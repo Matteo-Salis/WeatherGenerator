@@ -1,0 +1,115 @@
+# (C) Copyright 2024 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+ICON :
+  healpix_level: 7
+  type : anemoi
+  filenames : ['/capstor/store/mch/msopr/ml/datasets/mch-realch1-fdb-1km-2005-2025-1h-pl13-v1.0.zarr']
+  frequency : 1h
+  stream_id : 0
+  source_exclude : ['TOT_PREC_1H', 'TOT_PREC_6H', 'CAPE_ML', 'CAPE_MU', 'CIN_ML', 'CIN_MU', 'CLCH', 'CLCL', 'CLCM', 'CLCT', 'OMEGA_50', 'OMEGA_100', 'OMEGA_150', 'OMEGA_200', 'OMEGA_250', 'OMEGA_300', 'OMEGA_400', 'OMEGA_500', 'OMEGA_600', 'OMEGA_700', 'OMEGA_850', 'OMEGA_925', 'OMEGA_1000', 'LPI', 'PLCOV', 'SKC', 'SKT', 'W_SO']
+  target_exclude : [ 'TOT_PREC_6H', 'CAPE_ML', 'CAPE_MU', 'CIN_ML', 'CIN_MU', 'CLCH', 'CLCL', 'CLCM', 'CLCT', 'OMEGA_50', 'OMEGA_100', 'OMEGA_150', 'OMEGA_200', 'OMEGA_250', 'OMEGA_300', 'OMEGA_400', 'OMEGA_500', 'OMEGA_600', 'OMEGA_700', 'OMEGA_850', 'OMEGA_925', 'OMEGA_1000', 'LPI', 'PLCOV', 'SKC', 'SKT', 'W_SO']
+  geoinfo_channels : ['FR_LAND', 'FIS', 'SSO_STDH', 'SSO_SIGMA', 'SSO_GAMMA', 'SSO_THETA', 'insolation', 'SOILTYP'] 
+  loss_weight : 1.
+  #location_weight : cosine_latitude
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 1024
+  tokenize_spacetime : True
+  max_num_targets: 1147980
+
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 256
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+    # sampling_rate : 0.5
+  pred_head :
+    ens_size : 1
+    num_layers : 1
+  channel_weights :
+    U_10M : 0.1
+    V_10M : 0.1
+    TD_2M : 0.5
+    T_2M : 1.0
+    PMSL : 1.0
+    TOT_PREC_1H : 0.025
+    PS : 10
+    QV_50: 0.15
+    QV_100: 0.18
+    QV_150: 0.21
+    QV_200: 0.24
+    QV_250: 0.27
+    QV_300: 0.3
+    QV_400: 0.36
+    QV_500: 0.42
+    QV_600: 0.48
+    QV_700: 0.54
+    QV_850: 0.63
+    QV_925: 0.675
+    QV_1000: 0.72
+    T_50: 1.5
+    T_100: 1.8
+    T_150: 2.1
+    T_200: 2.4
+    T_250: 2.7
+    T_300: 3.0
+    T_400: 3.6
+    T_500: 4.2
+    T_600: 4.8
+    T_700: 5.4
+    T_850: 6.3
+    T_925: 6.75
+    T_1000: 7.2
+    U_50: 0.2
+    U_100: 0.24
+    U_150: 0.28
+    U_200: 0.32
+    U_250: 0.36
+    U_300: 0.4
+    U_400: 0.48
+    U_500: 0.56
+    U_600: 0.64
+    U_700: 0.72
+    U_850: 0.84
+    U_925: 0.9
+    U_1000: 0.8
+    V_50: 0.125
+    V_100: 0.15
+    V_150: 0.175
+    V_200: 0.2
+    V_250: 0.225
+    V_300: 0.25
+    V_400: 0.3
+    V_500: 0.35
+    V_600: 0.4
+    V_700: 0.45
+    V_850: 0.525
+    V_925: 0.5625
+    V_1000: 0.6
+    FI_50: 3.0
+    FI_100: 3.6
+    FI_150: 4.2
+    FI_200: 4.8
+    FI_250: 5.4
+    FI_300: 6.0
+    FI_400: 7.2
+    FI_500: 8.4
+    FI_600: 9.6
+    FI_700: 10.8
+    FI_850: 12.6
+    FI_925: 13.5
+    FI_1000: 14.4
