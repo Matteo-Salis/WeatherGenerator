@@ -24,36 +24,48 @@ class Tokenizer:
     Base class for tokenizers.
     """
 
-    def __init__(self, healpix_level: int):
+    def __init__(self, hl_source: int, hl_target: int = None, grid_source=None, grid_target=None):
         ref = torch.tensor([1.0, 0.0, 0.0])
 
-        self.healpix_level = healpix_level
-        self.hl_source = healpix_level
-        self.hl_target = healpix_level
+        # Sources are tokenized on the encoder's own grid (hl_source / grid_source); targets on the
+        # forecast grid (hl_target / grid_target). When the target level/grid is omitted it mirrors
+        # the source, recovering the single-grid behaviour. Per-cell geometry is built full at each
+        # level then restricted to its active region.
+        self.hl_source = hl_source
+        self.hl_target = hl_target if hl_target is not None else hl_source
+        self.grid_source = grid_source
+        self.grid_target = grid_target if grid_target is not None else grid_source
+        # source level/grid drive source tokenization in get_tokens_windows
+        self.healpix_level = self.hl_source
+        self.grid = self.grid_source
 
-        self.num_healpix_cells_source = 12 * 4**self.hl_source
-        self.num_healpix_cells_target = 12 * 4**self.hl_target
+        self.num_healpix_cells_source = (
+            self.grid_source.num_cells if self.grid_source is not None else 12 * 4**self.hl_source
+        )
+        self.num_healpix_cells_target = (
+            self.grid_target.num_cells if self.grid_target is not None else 12 * 4**self.hl_target
+        )
 
         self.size_time_embedding = 6
 
-        verts00, verts00_rots = healpix_verts_rots(self.hl_source, 0.0, 0.0)
-        verts10, verts10_rots = healpix_verts_rots(self.hl_source, 1.0, 0.0)
-        verts11, verts11_rots = healpix_verts_rots(self.hl_source, 1.0, 1.0)
-        verts01, verts01_rots = healpix_verts_rots(self.hl_source, 0.0, 1.0)
-        vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_source, 0.5, 0.5)
+        verts00_s, verts00_rots_s = healpix_verts_rots(self.hl_source, 0.0, 0.0)
+        verts10_s, verts10_rots_s = healpix_verts_rots(self.hl_source, 1.0, 0.0)
+        verts11_s, verts11_rots_s = healpix_verts_rots(self.hl_source, 1.0, 1.0)
+        verts01_s, verts01_rots_s = healpix_verts_rots(self.hl_source, 0.0, 1.0)
+        vertsmm_s, vertsmm_rots_s = healpix_verts_rots(self.hl_source, 0.5, 0.5)
         self.hpy_verts = [
-            verts00.to(torch.float32),
-            verts10.to(torch.float32),
-            verts11.to(torch.float32),
-            verts01.to(torch.float32),
-            vertsmm.to(torch.float32),
+            verts00_s.to(torch.float32),
+            verts10_s.to(torch.float32),
+            verts11_s.to(torch.float32),
+            verts01_s.to(torch.float32),
+            vertsmm_s.to(torch.float32),
         ]
         self.hpy_verts_rots_source = [
-            verts00_rots.to(torch.float32),
-            verts10_rots.to(torch.float32),
-            verts11_rots.to(torch.float32),
-            verts01_rots.to(torch.float32),
-            vertsmm_rots.to(torch.float32),
+            verts00_rots_s.to(torch.float32),
+            verts10_rots_s.to(torch.float32),
+            verts11_rots_s.to(torch.float32),
+            verts01_rots_s.to(torch.float32),
+            vertsmm_rots_s.to(torch.float32),
         ]
 
         verts00, verts00_rots = healpix_verts_rots(self.hl_target, 0.0, 0.0)
@@ -61,13 +73,6 @@ class Tokenizer:
         verts11, verts11_rots = healpix_verts_rots(self.hl_target, 1.0, 1.0)
         verts01, verts01_rots = healpix_verts_rots(self.hl_target, 0.0, 1.0)
         vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_target, 0.5, 0.5)
-        self.hpy_verts = [
-            verts00.to(torch.float32),
-            verts10.to(torch.float32),
-            verts11.to(torch.float32),
-            verts01.to(torch.float32),
-            vertsmm.to(torch.float32),
-        ]
         self.hpy_verts_rots_target = [
             verts00_rots.to(torch.float32),
             verts10_rots.to(torch.float32),
@@ -115,6 +120,16 @@ class Tokenizer:
             .transpose(1, 0)
             .to(torch.float32)
         )
+
+        if self.grid_source is not None and not self.grid_source.is_full:
+            a2g = torch.from_numpy(self.grid_source.active_to_global).to(torch.long)
+            self.hpy_verts = [v[a2g] for v in self.hpy_verts]
+            self.hpy_verts_rots_source = [v[a2g] for v in self.hpy_verts_rots_source]
+        if self.grid_target is not None and not self.grid_target.is_full:
+            a2g = torch.from_numpy(self.grid_target.active_to_global).to(torch.long)
+            self.hpy_verts_rots_target = [v[a2g] for v in self.hpy_verts_rots_target]
+            self.hpy_verts_local_target = self.hpy_verts_local_target[a2g]
+            self.hpy_nctrs_target = self.hpy_nctrs_target[:, a2g, :]
 
     def compute_source_centroids(self, source_tokens_cells: list[torch.Tensor]) -> torch.Tensor:
         source_means = [

@@ -18,6 +18,7 @@ from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
     encode_times_source,
     encode_times_target,
+    restrict_to_active,
     tokenize_apply_mask_source,
     tokenize_apply_mask_target,
     tokenize_space,
@@ -40,8 +41,15 @@ def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
 
 
 class TokenizerMasking(Tokenizer):
-    def __init__(self, healpix_level: int, masker: Masker):
-        super().__init__(healpix_level)
+    def __init__(
+        self,
+        masker: Masker,
+        hl_source: int,
+        hl_target: int = None,
+        grid_source=None,
+        grid_target=None,
+    ):
+        super().__init__(hl_source, hl_target, grid_source, grid_target)
         self.masker = masker
         self.rng = None
         self.token_size = None
@@ -61,8 +69,19 @@ class TokenizerMasking(Tokenizer):
 
         tok_spacetime = stream_info.get("tokenize_spacetime", False)
         tok = tokenize_spacetime if tok_spacetime else tokenize_space
-        hl = self.healpix_level
+        # sources are tokenized on this encoder's grid (hl_source / grid_source); targets on the
+        # forecast grid (hl_target / grid_target)
+        hl, grid = (
+            (self.hl_source, self.grid_source)
+            if pad_tokens
+            else (self.hl_target, self.grid_target)
+        )
         token_size = stream_info["token_size"]
+
+        # active cell ids 
+        active_to_global = grid.active_to_global if grid is not None else np.arange(12 * 4**hl)
+        # fast path: full globe is exactly the previous behaviour
+        passthrough = grid is None or grid.is_full
 
         tokens = []
         for rdata in data:
@@ -70,10 +89,14 @@ class TokenizerMasking(Tokenizer):
             if rdata.is_empty():
                 tokens += [(None, None)]
                 continue
-            # tokenize data
+            # tokenize data at the grid's level
             idxs_cells, idxs_cells_lens = tok(
                 readerdata_to_torch(rdata), token_size, hl, pad_tokens
             )
+            if not passthrough:
+                idxs_cells, idxs_cells_lens = restrict_to_active(
+                    idxs_cells, idxs_cells_lens, active_to_global
+                )
             tokens += [(idxs_cells, idxs_cells_lens)]
 
         return tokens
@@ -81,13 +104,15 @@ class TokenizerMasking(Tokenizer):
     def build_samples_for_stream(
         self,
         training_mode: str,
-        num_cells: int,
         stream_info: dict,
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
-        Create masks for samples
+        Create masks for samples (source masks on this tokenizer's source grid, target masks on
+        its target/forecast grid).
         """
-        return self.masker.build_samples_for_stream(training_mode, num_cells, stream_info)
+        return self.masker.build_samples_for_stream(
+            training_mode, self.grid_source, self.grid_target, stream_info
+        )
 
     def cell_to_token_mask(self, idxs_cells, idxs_cells_lens, mask):
         """ """

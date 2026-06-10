@@ -220,6 +220,16 @@ def tokenize_spacetime(
     return idxs_cells, idxs_cells_lens
 
 
+def restrict_to_active(idxs_cells, idxs_cells_lens, active_to_global):
+    """Select the active cells (in active-index order) from a full per-cell tokenization.
+    Each stream is tokenized on its encoder's own grid
+    """
+    return (
+        [idxs_cells[g] for g in active_to_global],
+        [idxs_cells_lens[g] for g in active_to_global],
+    )
+
+
 def tokenize_apply_mask_source(
     idxs_cells,
     idxs_cells_lens,

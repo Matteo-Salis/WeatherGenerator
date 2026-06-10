@@ -1,3 +1,4 @@
+# ruff: noqa: N806  # HEALPix levels use short upper-case names (F, L) by convention
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -27,6 +28,7 @@ from weathergen.datasets.data_reader_base import (
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
+from weathergen.datasets.healpix_grid import NativeGrid
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -105,11 +107,39 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
-        # initialise healpic
+        # initialise healpix native grids
         self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**self.healpix_level
+        F = int(cf.get("fe_healpix_level", cf.healpix_level))
+        self.fe_healpix_level = F
+        self.grid_F = NativeGrid(cf, level=F)
+
+        # group streams by their native encoder level (stream config overrides cf default)
+        self.stream_level = {
+            name: int(si.get("healpix_level", cf.healpix_level)) for name, si in cf.streams.items()
+        }
+        self.encoder_levels = sorted(set(self.stream_level.values()))
+        self.stream_names_by_level = {
+            L: [n for n in cf.streams.keys() if self.stream_level[n] == L]
+            for L in self.encoder_levels
+        }
+
+        self.grids = {L: NativeGrid(cf, level=L) for L in self.encoder_levels}
+        # single shared masker; per-call grids come from each tokenizer's grid_source/grid_target
         self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
-        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
+        self.tokenizers = {
+            L: TokenizerMasking(
+                self.masker,
+                hl_source=L,
+                hl_target=F,
+                grid_source=self.grids[L],
+                grid_target=self.grid_F,
+            )
+            for L in self.encoder_levels
+        }
+
+        # forecast/decoder/target grid sizing
+        self.num_healpix_cells = self.grid_F.num_cells
+        self.num_global_cells = self.grid_F.num_global
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
@@ -147,6 +177,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.data_loader_rng_seed = rs if rs > nw else rs * 97
 
         self.rng = None
+
+    def _tokenizer_for(self, stream_info):
+        """Tokenizer for the encoder level a stream belongs to."""
+        L = int(stream_info.get("healpix_level", self.healpix_level))
+        return self.tokenizers[L]
 
     def check_samples(self, fsm: int):
         """Check if samples_per_mini_epoch is suitable
@@ -327,7 +362,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             raise ValueError(f"Unknown forecast policy {self.forecast_policy}")
 
         # reset tokenizer RNG
-        self.tokenizer.reset_rng(self.rng)
+        for tok in self.tokenizers.values():
+            tok.reset_rng(self.rng)
         return (perms, fs)
 
     def _get_fsm(self) -> int:
@@ -356,7 +392,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             else ds.readers[0].get_source_num_channels()
             + ds.readers[0].get_geoinfo_size()
             + ds.readers[0].get_coords_size()
-            + self.tokenizer.get_size_time_embedding()
+            + next(iter(self.tokenizers.values())).get_size_time_embedding()
             for ds in self.streams_datasets.values()
         ]
 
@@ -408,6 +444,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             StreamData with source and targets masked according to view_meta
         """
 
+        tok = self._tokenizer_for(stream_info)
         if "network_input" in mode:
             # iterate overall input steps
             for step, idx in enumerate(range(base_idx, base_idx - num_steps_input, -1)):
@@ -424,7 +461,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     continue
 
                 # preprocess data for model input
-                (source_cells, source_cells_lens) = self.tokenizer.get_source(
+                (source_cells, source_cells_lens) = tok.get_source(
                     stream_info,
                     rdata,
                     token_data,
@@ -453,6 +490,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         """
 
+        tok = self._tokenizer_for(stream_info)
         # collect for all forecast steps
         num_output_steps = self._get_output_length(num_forecast_steps)
         for step, timestep_idx in enumerate(range(self.output_offset, num_output_steps)):
@@ -467,7 +505,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 continue
 
             if "target_coords" in mode:
-                (tc, tc_l) = self.tokenizer.get_target_coords(
+                (tc, tc_l) = tok.get_target_coords(
                     stream_info,
                     rdata,
                     token_data,
@@ -477,7 +515,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 stream_data.add_target_coords(timestep_idx, tc, tc_l, rdata.is_spoof)
 
             if "target_values" in mode:
-                (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
+                (tt_cells, tt_t, tt_c, idxs_inv) = tok.get_target_values(
                     stream_info,
                     rdata,
                     token_data,
@@ -525,11 +563,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
 
         num_output_steps = self._get_output_length(num_forecast_steps)
+        L = int(stream_info.get("healpix_level", self.healpix_level))
         stream_data = StreamData(
             base_idx,
             num_steps_input,
             num_output_steps,
-            self.num_healpix_cells,
+            self.grids[L].num_cells,
+            self.grid_F.num_cells,
         )
 
         stream_data = self._build_stream_data_input(
@@ -615,10 +655,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         masks = {}
         for stream_name, stream_data in self.streams_datasets.items():
             stream_info = stream_data.info
-            # Build source and target sample masks
-            masks[stream_name] = self.tokenizer.build_samples_for_stream(
+            # Build source masks on the stream's encoder grid and target masks on the forecast
+            # grid (the masker restricts them to each grid's active region before returning)
+            masks[stream_name] = self._tokenizer_for(stream_info).build_samples_for_stream(
                 training_mode,
-                self.num_healpix_cells,
                 stream_info,
             )
             # identical for all streams
@@ -637,13 +677,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
         Perform necessary pre-processing of model batch
         """
-        stream_names = list(self.streams_datasets.keys())
-        batch.source_samples.tokens_lens = get_tokens_lens(
-            stream_names, batch.source_samples, source_input_steps
-        )
-        batch.target_samples.tokens_lens = get_tokens_lens(
-            stream_names, batch.target_samples, target_input_steps
-        )
+        # per-level token counts; each encoder consumes only its level's tensor (passed explicitly
+        # to EncoderModule.forward). Targets are tokenized on the forecast grid F but keyed by the
+        # same per-stream levels so student_teacher target encoding reads matching counts.
+        batch.source_samples.tokens_lens_by_level = {
+            L: get_tokens_lens(names, batch.source_samples, source_input_steps)
+            for L, names in self.stream_names_by_level.items()
+        }
+        batch.target_samples.tokens_lens_by_level = {
+            L: get_tokens_lens(names, batch.target_samples, target_input_steps)
+            for L, names in self.stream_names_by_level.items()
+        }
 
         return batch
 
@@ -701,8 +745,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
-            input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
-            output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
+            tok = self._tokenizer_for(stream_info)
+            input_tokens = tok.get_tokens_windows(stream_info, input_data, True)
+            output_tokens = tok.get_tokens_windows(stream_info, output_data, False)
 
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target

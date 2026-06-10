@@ -64,7 +64,16 @@ fe_impute_latent_noise_std: 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 
-healpix_level: 5
+healpix_level: 7
+
+encoder_fusion_reduce: avg
+
+healpix_active_region:
+  name: icon
+  # great-circle buffer around the region box (resolution-independent; same geographic
+  # extent at every healpix level). Omit or set to 0 for no buffer.
+  buffer_km: 150
+
 
 rope_2D: False
 
@@ -90,7 +99,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg_forecasting/"
+streams_directory: "./config/streams/era5_icon/"
 streams: ???
 
 # type of zarr_store

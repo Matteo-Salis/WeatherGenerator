@@ -1,4 +1,5 @@
 # ruff: noqa: T201
+# ruff: noqa: N806  # HEALPix levels use short upper-case names (F, L) by convention
 # (C) Copyright 2025 WeatherGenerator contributors.
 
 #
@@ -11,9 +12,7 @@
 
 import logging
 import typing
-import warnings
 
-import astropy_healpix as hp
 import numpy as np
 import torch
 import torch.nn as nn
@@ -21,6 +20,7 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.healpix_grid import NativeGrid
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -34,6 +34,7 @@ from weathergen.model.engines import (
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
+from weathergen.model.latent_regrid import LatentRegridder
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
@@ -87,20 +88,12 @@ class ModelParams(torch.nn.Module):
 
         self.cf = cf
 
-        self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**cf.healpix_level
-
-        # HEALPix neighbours
-        hlc = self.healpix_level
-        with warnings.catch_warnings(action="ignore"):
-            temp = hp.neighbours(
-                np.arange(self.num_healpix_cells), 2**hlc, order="nested"
-            ).transpose()
-        # fix missing nbors with references to self
-        for i, row in enumerate(temp):
-            temp[i][row == -1] = i
+        F = int(cf.get("fe_healpix_level", cf.healpix_level))
+        self.grid = NativeGrid(cf, level=F)
+        self.healpix_level = F
+        self.num_healpix_cells = self.grid.num_cells
         self.hp_nbours = torch.nn.Parameter(
-            torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32),
+            torch.empty((self.num_healpix_cells, 9), dtype=torch.int32),
             requires_grad=False,
         )
 
@@ -113,16 +106,7 @@ class ModelParams(torch.nn.Module):
         each with its own cell number as well as the cell numbers of its neighbors. If a cell has
         fewer than eight neighbors, use its own cell number to fill the remaining slots.
         """
-        hlc = self.healpix_level
-        num_healpix_cells = self.num_healpix_cells
-        with warnings.catch_warnings(action="ignore"):
-            temp = hp.neighbours(np.arange(num_healpix_cells), 2**hlc, order="nested").transpose()
-        # fix missing nbors with references to self
-        for i, row in enumerate(temp):
-            temp[i][row == -1] = i
-        # nbors *and* self
-        self.hp_nbours.data[:, 0] = torch.arange(temp.shape[0], device=self.hp_nbours.device)
-        self.hp_nbours.data[:, 1:] = torch.from_numpy(temp).to(self.hp_nbours.device)
+        self.hp_nbours.data.copy_(self.grid.neighbours_self_filled().to(self.hp_nbours.device))
 
         return
 
@@ -178,8 +162,10 @@ class Model(torch.nn.Module):
         """
         super(Model, self).__init__()
 
-        self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**self.healpix_level
+        F = int(cf.get("fe_healpix_level", cf.healpix_level))
+        self.grid = NativeGrid(cf, level=F)
+        self.healpix_level = F
+        self.num_healpix_cells = self.grid.num_cells
 
         self.cf = cf
         self.dtype = get_dtype(self.cf.attention_dtype)
@@ -188,7 +174,8 @@ class Model(torch.nn.Module):
         self.targets_coords_size = targets_coords_size
 
         self.embed_target_coords = None
-        self.encoder: EncoderModule | None = None
+        self.encoders: torch.nn.ModuleDict | None = None
+        self.regridders: torch.nn.ModuleDict | None = None
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
@@ -238,9 +225,31 @@ class Model(torch.nn.Module):
         """Create each individual module of the model"""
         cf = self.cf
 
-        self.encoder = EncoderModule(
-            cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
-        )
+        # group streams by their native encoder level (per-stream override, default healpix_level);
+        # streams sharing a level share an encoder. The per-encoder latents are regridded onto the
+        # single forecast grid (level F = fe_healpix_level) and summed in encode_and_fuse.
+        stream_names = list(cf.streams.keys())
+        level_of = {
+            n: int(cf.streams[n].get("healpix_level", cf.healpix_level)) for n in stream_names
+        }
+        levels = sorted(set(level_of.values()))
+        reduce_op = cf.get("encoder_fusion_reduce", "avg")
+
+        self.encoders = torch.nn.ModuleDict()
+        self.regridders = torch.nn.ModuleDict()
+        for L in levels:
+            idxs = [i for i, n in enumerate(stream_names) if level_of[n] == L]
+            streams_L = {stream_names[i]: cf.streams[stream_names[i]] for i in idxs}
+            enc = EncoderModule(
+                cf,
+                [self.sources_size[i] for i in idxs],
+                [self.targets_num_channels[i] for i in idxs],
+                [self.targets_coords_size[i] for i in idxs],
+                level=L,
+                streams=streams_L,
+            )
+            self.encoders[str(L)] = enc
+            self.regridders[str(L)] = LatentRegridder(enc.grid, self.grid, reduce_op=reduce_op)
 
         mode_cfg = cf.training_config
         if cf.fe_num_blocks > 0:
@@ -453,29 +462,47 @@ class Model(torch.nn.Module):
                 pass
 
         self.apply(_reset_params)
-        if self.encoder is not None:
-            self.encoder.reset_parameters()
+        if self.encoders is not None:
+            for encoder in self.encoders.values():
+                encoder.reset_parameters()
+        if self.regridders is not None:
+            for regridder in self.regridders.values():
+                regridder.reset_parameters()
         if self.forecast_engine is not None:
             self.forecast_engine.reset_parameters()
 
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
 
-        num_params_embed = [
-            get_num_parameters(self.encoder.embed_engine.embeds[name])
-            for name in self.streams.keys()
-        ]
+        encoders = list(self.encoders.values()) if self.encoders is not None else []
+
+        # per-stream embed params: gather from whichever encoder owns the stream
+        def _embed_params(name):
+            return sum(
+                get_num_parameters(enc.embed_engine.embeds[name])
+                for enc in encoders
+                if name in enc.embed_engine.embeds
+            )
+
+        num_params_embed = [_embed_params(name) for name in self.streams.keys()]
         num_params_total = get_num_parameters(self)
-        num_params_ae_local = get_num_parameters(self.encoder.ae_local_engine.ae_local_blocks)
-        num_params_ae_global = get_num_parameters(self.encoder.ae_global_engine.ae_global_blocks)
-
-        num_params_q_cells = (
-            np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
+        # sum the per-engine parameter counts across all encoders
+        num_params_ae_local = sum(
+            get_num_parameters(enc.ae_local_engine.ae_local_blocks) for enc in encoders
         )
-        num_params_ae_adapter = get_num_parameters(self.encoder.ae_local_global_engine)
+        num_params_ae_global = sum(
+            get_num_parameters(enc.ae_global_engine.ae_global_blocks) for enc in encoders
+        )
 
-        num_params_ae_aggregation = get_num_parameters(
-            self.encoder.ae_aggregation_engine.ae_aggregation_blocks
+        num_params_q_cells = sum(
+            np.prod(enc.q_cells.shape) if enc.q_cells.requires_grad else 0 for enc in encoders
+        )
+        num_params_ae_adapter = sum(
+            get_num_parameters(enc.ae_local_global_engine) for enc in encoders
+        )
+
+        num_params_ae_aggregation = sum(
+            get_num_parameters(enc.ae_aggregation_engine.ae_aggregation_blocks) for enc in encoders
         )
 
         num_params_latent_heads = get_num_parameters(self.latent_heads)
@@ -538,6 +565,31 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
+    def encode_and_fuse(self, batch):
+        """Run each per-level encoder, regrid its cell latents onto grid_F, and sum.
+
+        Returns (fused_tokens (rs, (num_aux+num_cells_F)*Q, dim), posteriors_list)."""
+        Q = self.cf.ae_local_num_queries
+        num_aux = self.num_aux_tokens
+        fused_cells = None
+        fused_aux = None
+        posteriors = []
+        for L_str, encoder in self.encoders.items():
+            tokens_L, posteriors_L = encoder(batch, batch.tokens_lens_by_level[int(L_str)])
+            rs, _, dim = tokens_L.shape
+            n_cells_L = encoder.num_healpix_cells
+            tokens_L = tokens_L.reshape(rs, num_aux + n_cells_L, Q, dim)
+            aux_L = tokens_L[:, :num_aux]
+            cells_L = tokens_L[:, num_aux:]
+            cells_F = self.regridders[L_str](cells_L)
+            fused_cells = cells_F if fused_cells is None else fused_cells + cells_F
+            fused_aux = aux_L if fused_aux is None else fused_aux + aux_L
+            posteriors = posteriors + (
+                posteriors_L if isinstance(posteriors_L, list) else [posteriors_L]
+            )
+        fused = torch.cat([fused_aux, fused_cells], dim=1).flatten(1, 2)
+        return fused, posteriors
+
     def forward(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
         """Forward pass of the model
 
@@ -551,7 +603,7 @@ class Model(torch.nn.Module):
 
         output = ModelOutput(batch.get_output_len())
 
-        tokens, posteriors = self.encoder(batch)
+        tokens, posteriors = self.encode_and_fuse(batch)
         output.add_latent_prediction(0, "posteriors", posteriors)
 
         # recover batch dimension and separate input_steps

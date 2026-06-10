@@ -287,6 +287,7 @@ def build_spherical_rope_coeff_tensors(
     num_extra_tokens: int,
     device=None,
     dtype=torch.float32,
+    cell_ids=None,
 ) -> tuple[
     tuple[torch.Tensor, torch.Tensor],
     tuple[torch.Tensor, torch.Tensor],
@@ -298,6 +299,10 @@ def build_spherical_rope_coeff_tensors(
     real_maps, imag_maps = _healpy_band_maps(nside, band)
     cell_real = torch.as_tensor(real_maps, device=device, dtype=dtype)
     cell_imag = torch.as_tensor(imag_maps, device=device, dtype=dtype)
+    if cell_ids is not None:
+        idx = torch.as_tensor(cell_ids, device=cell_real.device, dtype=torch.long)
+        cell_real = cell_real[idx]
+        cell_imag = cell_imag[idx]
 
     extra_real = torch.ones(
         num_extra_tokens, cell_real.shape[-1], device=cell_real.device, dtype=cell_real.dtype

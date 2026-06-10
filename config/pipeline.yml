@@ -4,18 +4,8 @@ stages:
     config_files:
       - config/config_forecasting.yml
     options:
-      - training_config.num_mini_epochs=32
+      - training_config.num_mini_epochs=16
     chain_jobs: 4
-    nodes: 2
-    slurm_args:
-      - "--time=10:00:00"
-
-  - name: finetune
-    stage: train
-    from_run_id: STAGE.pretrain   
-    config_files:
-      - config/config_forecasting_finetuning.yml
-    chain_jobs: 2
     nodes: 2
     slurm_args:
       - "--time=10:00:00"

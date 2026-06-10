@@ -141,7 +141,8 @@ class BatchSamples:
     """
 
     samples: list[Sample]
-    tokens_lens: torch.Tensor | None
+    # per-level token counts: {encoder_level -> (steps, samples, streams_L, cells_L)}
+    tokens_lens_by_level: dict[int, torch.Tensor] | None
     output_steps: int
     output_idxs: list[int]
     device: str | None
@@ -150,7 +151,7 @@ class BatchSamples:
         self, stream_names: list[str], num_samples: int, output_steps, output_idxs
     ) -> None:
         self.samples = [Sample(stream_names) for _ in range(num_samples)]
-        self.tokens_lens = None
+        self.tokens_lens_by_level = None
         self.output_steps = output_steps
         self.output_idxs = output_idxs
         self.device = None
@@ -162,8 +163,10 @@ class BatchSamples:
         for sample in self.samples:
             sample.to_device(device)
 
-        self.tokens_lens = (
-            self.tokens_lens.to(device, non_blocking=True) if self.tokens_lens is not None else None
+        self.tokens_lens_by_level = (
+            {L: t.to(device, non_blocking=True) for L, t in self.tokens_lens_by_level.items()}
+            if self.tokens_lens_by_level is not None
+            else None
         )
 
         self.device = device
@@ -176,14 +179,18 @@ class BatchSamples:
     def get_subset(self, subset: list | None = None):
         if subset is None:
             return self
-        else:
-            assert len(list(set(subset))) == len(subset), "subset contains duplicates"
-            # create copy and then select subset for samples and tokens_lens
-            bs = copy.deepcopy(self)
-            bs.samples = [bs.samples[i] for i in subset]
-            torch_idxs = torch.tensor(subset, dtype=torch.long, device=bs.tokens_lens.device)
-            bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
-            return bs
+        assert len(list(set(subset))) == len(subset), "subset contains duplicates"
+        # create copy and then select subset for samples and per-level token counts
+        bs = copy.deepcopy(self)
+        bs.samples = [bs.samples[i] for i in subset]
+        if bs.tokens_lens_by_level is not None:
+            device = next(iter(bs.tokens_lens_by_level.values())).device
+            torch_idxs = torch.tensor(subset, dtype=torch.long, device=device)
+            bs.tokens_lens_by_level = {
+                L: torch.index_select(t, 1, torch_idxs)
+                for L, t in bs.tokens_lens_by_level.items()
+            }
+        return bs
 
     def get_num_steps(self) -> int:
         """
@@ -245,9 +252,11 @@ class BatchSamples:
         for sample in self.samples:
             sample.pin_memory()
 
-        # pin source_tokens_lens
-        if isinstance(self.tokens_lens, torch.Tensor):
-            self.tokens_lens = self.tokens_lens.pin_memory()
+        # pin per-level token counts
+        if self.tokens_lens_by_level is not None:
+            self.tokens_lens_by_level = {
+                L: t.pin_memory() for L, t in self.tokens_lens_by_level.items()
+            }
 
         return self
 

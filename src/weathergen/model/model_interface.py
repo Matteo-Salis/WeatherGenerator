@@ -60,7 +60,8 @@ def init_model_and_shard(
 
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
-        model.encoder.q_cells.requires_grad = False
+        for encoder in model.encoders.values():
+            encoder.q_cells.requires_grad = False
 
     if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
@@ -93,17 +94,18 @@ def init_model_and_shard(
             MultiSelfAttentionHeadVarlen,
         )
 
-        for module in model.encoder.ae_local_engine.ae_local_blocks.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+        for encoder in model.encoders.values():
+            for module in encoder.ae_local_engine.ae_local_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
 
-        for module in model.encoder.ae_local_global_engine.ae_adapter.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+            for module in encoder.ae_local_global_engine.ae_adapter.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
 
-        for module in model.encoder.ae_global_engine.ae_global_blocks.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+            for module in encoder.ae_global_engine.ae_global_blocks.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
 
         for module in model.forecast_engine.fe_blocks.modules():
             if isinstance(module, modules_to_shard):
@@ -141,9 +143,10 @@ def init_model_and_shard(
         # functions in the embedding engine as forward functions. Thus, yielding a crash
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
-        for embed in model.encoder.embed_engine.embeds.values():
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
+        for encoder in model.encoders.values():
+            for embed in encoder.embed_engine.embeds.values():
+                torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
+                torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
     # complete initalization and load model if inference/continuing a run
     if run_id_contd is not None:

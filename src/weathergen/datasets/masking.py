@@ -118,7 +118,9 @@ class Masker:
         self.mask_value = 0.0
         self.dim_time_enc = 6
 
-        # number of healpix cells
+        # number of healpix cells (full globe at the native level); masks are generated on the
+        # full grid and restricted to the active region in build_samples_for_stream. The per-call
+        # source/target grids arrive through build_samples_for_stream, so the Masker is grid-free.
         self.healpix_level_data = healpix_level
         self.healpix_num_cells = 12 * (4**healpix_level)
 
@@ -333,13 +335,25 @@ class Masker:
     def build_samples_for_stream(
         self,
         training_mode: str,
-        num_cells: int,
+        source_grid,
+        target_grid,
         stream_info: dict,
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
         Construct teacher/student keep masks for a stream.
         SampleMetaData is currently just a dict with the masking params used.
+
+        Source masks are generated on the stream's encoder grid (``source_grid``, level L) and
+        target masks on the forecast grid (``target_grid``, level F). Masks are generated full-globe
+        at each grid's level and restricted to its active region at the end. Mask *relationships*
+        that combine source and target (MTM complement/subset/...) require both grids at the same
+        level (always true for the single-grid default); otherwise only forecast/independent masking
+        is supported across levels.
         """
+
+        hl_source, num_source = source_grid.level, source_grid.num_global
+        hl_target, num_target = target_grid.level, target_grid.num_global
+        same_level = hl_source == hl_target
 
         stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
 
@@ -368,12 +382,13 @@ class Masker:
             for _ in range(target_cfg.get("num_samples", 1)):
                 # determine if forcing dataset => mask is empty
                 if is_stream_forcing(stream_info, self.stage):
-                    target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
+                    target_mask, mask_params = torch.zeros(num_target, dtype=torch.bool), {}
                 else:
                     masking_config = target_cfg.get("masking_strategy_config", {})
                     # targets are never randomly dropped
                     target_mask, mask_params = self._get_mask(
-                        num_cells=num_cells,
+                        num_cells=num_target,
+                        hl_data=hl_target,
                         strategy=target_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
                         target_relationship_mask=("independent", None),
@@ -421,12 +436,21 @@ class Masker:
                 # target is specified)
                 target_idx += i_sample % target_num_samples[target_cfg_idx].item()
 
+                # mask relationships that combine source+target need both grids at the same level
+                assert same_level or relationship in (None, "independent"), (
+                    f"cross-level masking relationship '{relationship}' is not supported for "
+                    f"stream '{stream_info['name']}' (source level {hl_source} != forecast level "
+                    f"{hl_target}); use forecast/independent masking for streams whose level "
+                    "differs from fe_healpix_level."
+                )
+
                 # determine if diagnostic dataset or randomly dropped => mask is empty
                 if is_stream_diagnostic(stream_info, self.stage) or is_stream_dropped:
-                    source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
+                    source_mask, mask_params = torch.zeros(num_source, dtype=torch.bool), {}
                 else:
                     source_mask, mask_params = self._get_mask(
-                        num_cells=num_cells,
+                        num_cells=num_source,
+                        hl_data=hl_source,
                         strategy=source_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
                         target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
@@ -442,7 +466,23 @@ class Masker:
 
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
 
+        # restrict each grid's full-globe masks to its active region so they line up with the
+        # active-indexed token structure (identity / no-op on the full globe).
+        self._restrict_masks(target_masks, target_grid)
+        self._restrict_masks(source_masks, source_grid)
+
         return (target_masks, source_masks, source_target_mapping)
+
+    @staticmethod
+    def _restrict_masks(mask_data, grid) -> None:
+        """Restrict a MaskData's full-globe masks to ``grid``'s active cells (in place)."""
+        if grid is None or grid.is_full:
+            return
+        a2g = torch.from_numpy(grid.active_to_global).to(torch.long)
+        mask_data.masks = [m[a2g] for m in mask_data.masks]
+        for meta in mask_data.metadata:
+            if meta.mask is not None:
+                meta.mask = meta.mask[a2g]
 
     def _get_mask(
         self,
@@ -450,6 +490,7 @@ class Masker:
         strategy: str,
         masking_strategy_config: dict,
         target_relationship_mask: (str, np.typing.NDArray),
+        hl_data: int | None = None,
     ) -> (np.typing.NDArray, dict):
         """Get effective mask, combining with target mask if specified.
 
@@ -494,7 +535,9 @@ class Masker:
             return mask, {}
 
         # get mask
-        mask, params = self._generate_cell_mask(num_cells, strategy, masking_strategy_config)
+        mask, params = self._generate_cell_mask(
+            num_cells, strategy, masking_strategy_config, hl_data
+        )
 
         # handle cases where mask needs to be combined with target_mask
         # without the assert we can fail silently
@@ -516,6 +559,7 @@ class Masker:
         num_cells: int,
         strategy: str,
         masking_strategy_config: dict,
+        hl_data: int | None = None,
     ) -> (np.typing.NDArray, dict):
         """Generate a boolean keep mask at data healpix level (True = keep cell).
 
@@ -538,8 +582,9 @@ class Masker:
         # params describing the masking
         masking_params = {}
 
-        assert num_cells == self.healpix_num_cells, (
-            "num_cells inconsistent with configured healpix level."
+        hl_data = self.healpix_level_data if hl_data is None else hl_data
+        assert num_cells == 12 * (4**hl_data), (
+            "num_cells inconsistent with the requested healpix level."
         )
 
         # generate cell mask
@@ -558,7 +603,7 @@ class Masker:
             # prepare healpix-based masking
             keep_rate = self._get_sampling_rate(masking_strategy_config)
             hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
-                self._prepare_healpix_based_masking(masking_strategy_config, keep_rate)
+                self._prepare_healpix_based_masking(masking_strategy_config, keep_rate, hl_data)
             )
 
             if num_parents_to_keep == 0:
@@ -577,7 +622,7 @@ class Masker:
             # prepare healpix-based masking
             keep_rate = self._get_sampling_rate(masking_strategy_config)
             hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
-                self._prepare_healpix_based_masking(masking_strategy_config, keep_rate)
+                self._prepare_healpix_based_masking(masking_strategy_config, keep_rate, hl_data)
             )
 
             if num_parents_to_keep == 0:
@@ -773,12 +818,12 @@ class Masker:
 
         return selected
 
-    def _prepare_healpix_based_masking(self, cfg, keep_rate):
+    def _prepare_healpix_based_masking(self, cfg, keep_rate, hl_data=None):
         """
         Prepare healpix masking related attributes.
         """
 
-        hl_data = self.healpix_level_data
+        hl_data = self.healpix_level_data if hl_data is None else hl_data
         hl_mask = cfg.get("hl_mask")
         assert hl_mask is not None and hl_mask <= hl_data, (
             "For healpix keep mask generation, cfg['hl_mask'] must be set and <= data level."

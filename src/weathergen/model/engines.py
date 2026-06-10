@@ -16,6 +16,7 @@ from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
+from weathergen.datasets.healpix_grid import NativeGrid
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
@@ -42,19 +43,18 @@ from weathergen.utils.utils import get_dtype
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
-    def __init__(self, cf: Config, sources_size) -> None:
+    def __init__(self, cf: Config, sources_size, *, streams=None) -> None:
         """
-        Initialize the EmbeddingEngine with the configuration.
-
-        :param cf: Configuration object containing parameters for the engine.
+        :param cf: Configuration object.
         :param sources_size: List of source sizes for each stream.
+        :param streams: Streams dict; overrides ``cf.streams`` when provided.
         """
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
         self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.streams = cf.streams
+        self.streams = cf.streams if streams is None else streams
 
         for i, (stream_name, si) in enumerate(self.streams.items()):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
@@ -85,10 +85,10 @@ class EmbeddingEngine(torch.nn.Module):
             else:
                 raise ValueError("Unsupported embedding network type")
 
-    def forward(self, batch, pe_embed):
+    def forward(self, batch, pe_embed, tokens_lens):
         num_steps_input = batch.get_num_steps()
 
-        num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
+        num_tokens = torch.sum(tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(
             (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
@@ -117,40 +117,40 @@ class EmbeddingEngine(torch.nn.Module):
 
         # if the assert is hit, max_number_tokens_local_per_cell in config needs to be increased
         max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
-        assert batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
+        assert tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
             "max number of tokens per cell for positional encoding exceeded."
         )
         " Increase ae_local_max_tokens_per_cell in config."
 
-        if batch.tokens_lens.shape[2] == 1:
+        if tokens_lens.shape[2] == 1:
             # trivial with one stream
             tokens_all = torch.cat(x_embeds)
 
         else:
-            scatter_idxs = self.get_scatter_idxs_vectorized(batch)
+            scatter_idxs = self.get_scatter_idxs_vectorized(tokens_lens)
             scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
             # actual scatter operation and apply per cell positional encoding
             tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds))
 
-        pe_idxs = self.get_pe_idxs_vectorized(batch)
+        pe_idxs = self.get_pe_idxs_vectorized(tokens_lens)
         tokens_all = tokens_all + pe_embed[pe_idxs]
 
         return tokens_all
 
-    def get_pe_idxs_vectorized(self, batch):
+    def get_pe_idxs_vectorized(self, tokens_lens):
         """
         Compute per cell indices into positional encoding
         """
 
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
+        tok_counts = tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
         rows = torch.arange(tok_counts.max(), device=tok_counts.device).unsqueeze(0)
         rows = rows.expand(tok_counts.shape[0], -1)
         pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
 
         return pe_idxs
 
-    def get_scatter_idxs(self, batch):
+    def get_scatter_idxs(self, tokens_lens):
         """
         Compute reordering index so that tokens from different streams but same cell are
         continguous
@@ -158,10 +158,10 @@ class EmbeddingEngine(torch.nn.Module):
         Simple version (reference implementation)
         """
 
-        dev = batch.get_device()
-        # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
+        dev = tokens_lens.device
+        # tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
         # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+        tok_counts = tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
 
         scatter_idxs = []
         for i in range(len(tok_counts)):
@@ -179,7 +179,7 @@ class EmbeddingEngine(torch.nn.Module):
 
         return scatter_idxs
 
-    def get_scatter_idxs_vectorized(self, batch):
+    def get_scatter_idxs_vectorized(self, tokens_lens):
         """
         Compute reordering index so that tokens from different streams but same cell are
         continguous
@@ -187,10 +187,10 @@ class EmbeddingEngine(torch.nn.Module):
         Vectorized version
         """
 
-        dev = batch.get_device()
-        # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
+        dev = tokens_lens.device
+        # tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
         # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+        tok_counts = tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
 
         # partial sums for per cell offsets
         pad = torch.zeros((1, tok_counts.shape[1]), dtype=torch.int64, device=dev)
@@ -562,6 +562,7 @@ class ForecastingEngine(torch.nn.Module):
         super(ForecastingEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
+        self.grid = NativeGrid(cf)
         self.fe_blocks = torch.nn.ModuleList()
         self.rope_2D = cf.get("rope_2D", False)
         self.healpix_level = (
@@ -692,7 +693,14 @@ class ForecastingEngine(torch.nn.Module):
         cf = self.cf
 
         if self.rope_mode != "none":
+            cell_ids = (
+                None
+                if self.grid.is_full or self.healpix_level != self.grid.level
+                else self.grid.active_to_global
+            )
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            if cell_ids is not None:
+                verts = verts[torch.as_tensor(cell_ids, device=verts.device, dtype=torch.long)]
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
             self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
@@ -715,6 +723,7 @@ class ForecastingEngine(torch.nn.Module):
                     num_extra_tokens=self.num_extra_tokens,
                     device=self.rope_spherical_coeffs.device,
                     dtype=self.rope_spherical_coeffs.dtype,
+                    cell_ids=cell_ids,
                 )
                 self.rope_spherical_cell_coeffs.data[..., 0].copy_(cell_real)
                 self.rope_spherical_cell_coeffs.data[..., 1].copy_(cell_imag)

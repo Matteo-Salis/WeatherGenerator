@@ -16,6 +16,7 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.healpix_grid import NativeGrid
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.engines import (
     EmbeddingEngine,
@@ -42,19 +43,26 @@ logger = logging.getLogger(__name__)
 class EncoderModule(torch.nn.Module):
     name: "EncoderModule"
 
-    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size) -> None:
+    def __init__(
+        self,
+        cf: Config,
+        sources_size,
+        targets_num_channels,
+        targets_coords_size,
+        level: int | None = None,
+        streams=None,
+    ) -> None:
         """
-        Initialize the EmbeddingEngine with the configuration.
-
-        :param cf: Configuration object containing parameters for the engine.
-        :param sources_size: List of source sizes for each stream.
-        :param stream_names: Ordered list of stream identifiers aligned with cf.streams.
+        :param cf: Global configuration object.
+        :param level: HEALPix level for this encoder; overrides ``cf.healpix_level``.
+        :param streams: Streams dict for this encoder; overrides ``cf.streams``.
         """
         super(EncoderModule, self).__init__()
         self.cf = cf
 
-        self.healpix_level = cf.healpix_level
-        self.num_healpix_cells = 12 * 4**self.healpix_level
+        self.healpix_level = cf.healpix_level if level is None else level
+        self.grid = NativeGrid(cf, level=self.healpix_level)
+        self.num_healpix_cells = self.grid.num_cells
 
         self.dtype = get_dtype(cf.attention_dtype)
 
@@ -142,10 +150,9 @@ class EncoderModule(torch.nn.Module):
         self.interpolator_latents: LatentInterpolator | None = None
 
         # embedding engine
-        # determine stream names once so downstream components use consistent keys
-        self.stream_names = list(cf.streams.keys())
-        # separate embedding networks for differnt observation types
-        self.embed_engine = EmbeddingEngine(cf, self.sources_size)
+        _streams = streams if streams is not None else cf.streams
+        self.stream_names = list(_streams.keys())
+        self.embed_engine = EmbeddingEngine(cf, self.sources_size, streams=_streams)
 
         assert cf.ae_global_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
         self.num_register_tokens = cf.num_register_tokens
@@ -181,7 +188,7 @@ class EncoderModule(torch.nn.Module):
                 .repeat((1, cf.ae_local_num_queries, 2))
             )
             theta, phi = healpy.pix2ang(
-                nside=2**self.healpix_level, ipix=torch.arange(self.num_healpix_cells)
+                nside=2**self.healpix_level, ipix=self.grid.active_to_global_tensor()
             )
             q_cells[:, :, -6:-3] = (
                 torch.cos(theta).unsqueeze(1).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 3))
@@ -236,6 +243,8 @@ class EncoderModule(torch.nn.Module):
 
         if self.rope_mode != "none":
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            # restrict to active cells
+            verts = verts[self.grid.active_to_global_tensor(verts.device)]
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
             self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
@@ -258,6 +267,7 @@ class EncoderModule(torch.nn.Module):
                     num_extra_tokens=self.num_extra_tokens,
                     device=self.rope_spherical_coeffs.device,
                     dtype=self.rope_spherical_coeffs.dtype,
+                    cell_ids=None if self.grid.is_full else self.grid.active_to_global,
                 )
                 self.rope_spherical_cell_coeffs.data[..., 0].copy_(cell_real)
                 self.rope_spherical_cell_coeffs.data[..., 1].copy_(cell_imag)
@@ -300,17 +310,20 @@ class EncoderModule(torch.nn.Module):
         self.q_cells_lens.data.fill_(1)
         self.q_cells_lens.data[0] = 0
 
-    def forward(self, batch):
+    def forward(self, batch, tokens_lens):
         """
         Encoder forward
+
+        ``tokens_lens`` is this encoder's per-level token counts
+        ``(steps, samples, streams_L, cells_L)``; ``batch`` carries the shared samples/metadata.
         """
 
         stream_cell_tokens = checkpoint(
-            self.embed_engine, batch, self.pe_embed, use_reentrant=False
+            self.embed_engine, batch, self.pe_embed, tokens_lens, use_reentrant=False
         )
 
         tokens_global, posteriors = checkpoint(
-            self.assimilate_local, stream_cell_tokens, batch, use_reentrant=False
+            self.assimilate_local, stream_cell_tokens, batch, tokens_lens, use_reentrant=False
         )
 
         tokens_global = checkpoint(
@@ -340,7 +353,9 @@ class EncoderModule(torch.nn.Module):
 
         return tokens, posteriors
 
-    def assimilate_local_project_chunked(self, tokens, tokens_global, cell_lens, q_cells_lens):
+    def assimilate_local_project_chunked(
+        self, tokens, tokens_global, cell_lens, q_cells_lens
+    ):
         """
         Apply the local assimilation engine and then the
         local-to-global adapter using a chunking in the number of tokens
@@ -351,7 +366,7 @@ class EncoderModule(torch.nn.Module):
         zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
 
         # subdivision factor for required splitting
-        clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
+        clen = self.num_healpix_cells // (2 if self.healpix_level <= 5 else 8)
         tokens_global_unmasked = []
         posteriors = []
 
@@ -472,20 +487,22 @@ class EncoderModule(torch.nn.Module):
 
         return tokens_global_unmasked
 
-    def assimilate_local(self, tokens: torch.Tensor, batch: ModelBatch) -> torch.Tensor:
+    def assimilate_local(
+        self, tokens: torch.Tensor, batch: ModelBatch, tokens_lens: torch.Tensor
+    ) -> torch.Tensor:
         """
         Processes embedded tokens locally and prepares them for the global assimilation
 
         Args:
-            model_params : Query and embedding parameters
             tokens : Input tokens to be processed by local assimilation
-            cell_lens : Used to identify range of tokens to use from generated tokens in cell
-                embedding
+            batch : carries the shared samples (num steps, batch size)
+            tokens_lens : this encoder's per-level token counts
+                ``(steps, samples, streams_L, cells_L)``; identifies the range of tokens per cell
         Returns:
             Tokens for global assimilation
         """
 
-        cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
+        cell_lens = torch.sum(tokens_lens, 2).flatten()
 
         num_steps_input = batch.get_num_steps()
         rs = num_steps_input * len(batch)
@@ -512,7 +529,7 @@ class EncoderModule(torch.nn.Module):
         tokens_global_unmasked = self.aggregation_engine_unmasked(
             tokens_global_unmasked,
             tokens_global_register_class,
-            batch.tokens_lens,
+            tokens_lens,
             rope_cell_coords=self.rope_cell_coords,
             rope_cell_coeffs=self.rope_spherical_cell_coeffs,
             rope_extra_coeffs=self.rope_spherical_extra_coeffs,
