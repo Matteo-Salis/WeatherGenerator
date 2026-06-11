@@ -12,7 +12,7 @@ embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 2048
-ae_local_num_blocks: 0
+ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -65,11 +65,8 @@ fe_impute_latent_noise_std: 1e-4
 forecast_att_dense_rate: 1.0
 
 healpix_level: 7
-
-encoder_fusion_reduce: avg
-
 healpix_active_region:
-  name: icon
+  name: europe
   buffer_km: 50
 
 
@@ -97,7 +94,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_icon/"
+streams_directory: "./config/streams/era5_o96_cerra/"
 streams: ???
 
 # type of zarr_store
@@ -111,7 +108,7 @@ general:
   world_size: ???
 
   # local_rank, 
-  # with_ddp,
+  with_ddp: True
   # data_path_*, 
   # model_path, 
   # run_path, 
@@ -147,7 +144,7 @@ training_config:
   samples_per_mini_epoch: 4096
   shuffle: True
 
-  start_date: 1979-01-01T00:00
+  start_date: 1985-01-01T00:00
   end_date: 2022-12-31T00:00
 
   time_window_step: 06:00:00
@@ -209,7 +206,7 @@ validation_config:
   validate_with_ema: 
     enabled : True
     ema_ramp_up_ratio: 0.09
-    ema_halflife_in_thousands: 600
+    ema_halflife_in_thousands: 1e-3
 
   # parameters for validation samples that are written to disk
   output : {
@@ -239,7 +236,7 @@ wgtags:
   # The name of the organization of the person running the experiment.
   # This may be autofilled in the future. Expected values are lowercase strings 
   # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
-  org: null
+  org: "knmi-mf"
   # The Github issue corresponding to this run (number such as 1234)
   # Github issues are the central point when running experiment and contain 
   # links to hedgedocs, code branches, pull requests etc.
@@ -250,7 +247,7 @@ wgtags:
   # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
   # Examples: "rollout_ablation_grid"  
-  exp: null
+  exp: "pretraining_era5_o96_cerra"
   # *** Experiment-specific tags ***
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.

@@ -21,13 +21,11 @@ EARTH_RADIUS_KM = 6371.0
 
 
 def geographic_cell_centers(level: int) -> tuple[NDArray, NDArray]:
-    """Geographic (lat_deg, lon_deg) of every native cell centre.
-
-    Longitudes from HEALPix are in [0, 360); wrap them to [-180, 180) to match the region boxes.
+    """Cell-centre (lat_deg, lon_deg) in the tokenizer's coordinate convention.
     """
     num = 12 * 4**level
     lon, lat = hp.healpix_to_lonlat(np.arange(num), 2**level, order="nested")
-    geo_lon = ((lon.deg + 180.0) % 360.0) - 180.0
+    geo_lon = lon.deg - 180.0
     return lat.deg.astype(np.float64), geo_lon.astype(np.float64)
 
 
