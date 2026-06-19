@@ -5,6 +5,7 @@ stages:
       - config/config_forecasting_era5_cerra.yml
     options:
       - training_config.num_mini_epochs=32
+      - data_loading.num_workers=8
     chain_jobs: 4
     nodes: 2
     slurm_args:
