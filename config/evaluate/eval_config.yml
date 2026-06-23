@@ -62,26 +62,26 @@ default_streams:
   ERA5:
     channels: ["2t", "q_850", "10v", "10u", "z_500", "t_850", "u_850", "v_850"]
     evaluation:
-      forecast_step: "all"
+      forecast_step: 1-9
       sample: "all"
       ensemble: "all" #supported: "all", "mean", [0,1,2]
     plotting:
       sample: [0]
-      forecast_step: 1-20 #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+      forecast_step: 1-9 #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
       ensemble: "all" #supported: "all", "mean", [0,1,2]
       plot_maps: true
       plot_target: true
       plot_histograms: false
       plot_animations: true
   CERRA:
-    channels: ["2t", "r_850", "10si", "10wdir", "z_500", "t_850", "u_850", "v_850"]
+    channels: ["2t", "r_850", "10si", "10wdir", "z_500", "t_850", "u_850", "v_850", "2r", "msl"]
     evaluation:
-      forecast_step: "all"
+      forecast_step: 1-9
       sample: "all"
       ensemble: "all" #supported: "all", "mean", [0,1,2]
     plotting:
       sample: [0]
-      forecast_step: 1-20
+      forecast_step: 1-9
       ensemble: "all" #supported: "all", "mean", [0,1,2]
       plot_maps: true
       plot_target: true
@@ -90,9 +90,25 @@ default_streams:
       plot_subtimesteps: true
 
 run_ids :
+  f88yha0q:
+    label: "ERA5 + CERRA (Matteo)"
+    type: json
+    results_base_dir: "./results/f88yha0q"
+    streams:
+      CERRA:
+        channels: ["10si", "10wdir", "2r", "2t", "msl", "r_1000", "r_850", "t_850", "u_850", "v_850", "z_500"]
+        evaluation:
+          forecast_step: "all"
+          sample: "all"
+          ensemble: "all"
+
   mu6z4ei1:
-    label: "ICON + CERRA (CERRA Healpix=7, ERA5 Healpix=5)"
+    label: "ERA5 + CERRA (CERRA Healpix=7, ERA5 Healpix=5, 32 epochs)"
     results_base_dir: "./results/mu6z4ei1"
+
+  cxzeknw9:
+    label: "ERA5 + CERRA (CERRA Healpix=7, ERA5 Healpix=5, 64 epochs)"
+    results_base_dir: "./results/cxzeknw9"
 
   # scn09avu:
   #   label: "ICON + ERA5 (healpix=5)"
