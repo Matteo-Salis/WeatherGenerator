@@ -64,7 +64,7 @@ fe_impute_latent_noise_std: 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 
-healpix_level: 9
+healpix_level: 5
 healpix_active_region:
   name: europe
   rings: 1
@@ -94,7 +94,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_o96_cerra_hl9/"
+streams_directory: "./config/streams/era5_o96_cerra/"
 streams: ???
 
 # type of zarr_store

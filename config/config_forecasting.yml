@@ -70,7 +70,7 @@ encoder_fusion_reduce: avg
 
 healpix_active_region:
   name: icon
-  buffer_km: 50
+  rings: 1
 
 
 rope_2D: False

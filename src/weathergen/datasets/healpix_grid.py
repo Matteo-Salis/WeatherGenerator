@@ -17,8 +17,6 @@ from omegaconf import OmegaConf
 
 from weathergen.datasets.regions import get_region_box
 
-EARTH_RADIUS_KM = 6371.0
-
 
 def geographic_cell_centers(level: int) -> tuple[NDArray, NDArray]:
     """Cell-centre (lat_deg, lon_deg) in the tokenizer's coordinate convention.
@@ -29,33 +27,29 @@ def geographic_cell_centers(level: int) -> tuple[NDArray, NDArray]:
     return lat.deg.astype(np.float64), geo_lon.astype(np.float64)
 
 
-def _buffer_by_km(selected: NDArray, level: int, buffer_km: float) -> NDArray:
-    """Return all cells within ``buffer_km`` great-circle distance of any cell in ``selected``.
-    """
-    if buffer_km <= 0:
+def _buffer_by_rings(selected: NDArray, level: int, rings: int) -> NDArray:
+    """Return ``selected`` grown by ``rings`` layers of neighbouring HEALPix cells."""
+    if rings <= 0:
         return selected
 
-    num = 12 * 4**level
-    x, y, z = hp.healpix_to_xyz(np.arange(num), 2**level, order="nested")
-    xyz_all = np.stack([np.asarray(x), np.asarray(y), np.asarray(z)], axis=1).astype(np.float32)
-    xyz_sel = xyz_all[selected]
+    in_buffer = np.zeros(12 * 4**level, dtype=np.bool_)
+    in_buffer[selected] = True
 
-    cos_thresh = float(np.cos(buffer_km / EARTH_RADIUS_KM))
-
-    chunk = max(1, int(50 * 1024 * 1024 / (num * xyz_all.itemsize)))
-    in_buffer = np.zeros(num, dtype=bool)
-    for i in range(0, len(selected), chunk):
-        dots = xyz_all @ xyz_sel[i : i + chunk].T  
-        in_buffer |= (dots >= cos_thresh).any(axis=1)
+    for _ in range(rings):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="invalid value encountered")
+            temp = hp.neighbours(np.flatnonzero(in_buffer), 2**level, order="nested").transpose()
+        valid = temp != -1
+        in_buffer[temp[valid]] = True
 
     return np.sort(np.flatnonzero(in_buffer))
 
 
 def resolve_region_cells(level: int, region: dict) -> NDArray:
     """
-    Native nested cell ids inside the configured geographic box, grown by a ``buffer_km``
-    great-circle buffer. The buffer is resolution-independent: the same geographic extent is
-    selected at every HEALPix level, which is required for multi-level encoder fusion.
+    Native nested cell ids inside the configured geographic box, grown by a ``rings`` buffer
+    of neighbouring cells. The buffer is measured in cells, so a fixed ring count covers a
+    smaller geographic extent at finer HEALPix levels.
     """
     name = region.get("name")
     if name is not None:
@@ -82,7 +76,7 @@ def resolve_region_cells(level: int, region: dict) -> NDArray:
     selected = np.flatnonzero(sel).astype(np.int64)
     assert selected.size > 0, "healpix_active_region selected no healpix cells"
 
-    return _buffer_by_km(selected, level, float(region.get("buffer_km", 0)))
+    return _buffer_by_rings(selected, level, int(region.get("rings", 0)))
 
 
 class NativeGrid:

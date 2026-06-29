@@ -67,7 +67,7 @@ forecast_att_dense_rate: 1.0
 healpix_level: 7
 healpix_active_region:
   name: europe
-  buffer_km: 50
+  rings: 1
 
 
 rope_2D: False
