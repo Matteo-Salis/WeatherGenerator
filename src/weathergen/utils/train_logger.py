@@ -198,10 +198,17 @@ def read_metrics(
         for col_pattern in cols_patterns:
             cols += [col for col in df.columns if col_pattern in col]
 
+    # Wall-clock time (in hours) relative to the run start. Computed *before*
+    # filtering by stage so train and val share the same clock, i.e. val curves
+    # are offset by the time already spent training before each validation.
+    ts = df[_weathergen_timestamp]
+    df = df.with_columns(((ts - ts.min()) / 3_600_000.0).alias(_weathergen_reltime))
+
     if stage is not None:
         df = df.filter(pl.col("stage") == stage)
     df = df.drop("stage")
-    df = clean_df(df, cols)
+    # keep reltime so plots can use wall-clock time as the x-axis
+    df = clean_df(df, cols + [_weathergen_reltime] if cols else cols)
     return df
 
 
@@ -217,9 +224,6 @@ def clean_df(df, columns: list[str] | None):
     # Convert timestamp column to date
     df = df.with_columns(
         pl.from_epoch(df[_weathergen_timestamp], time_unit="ms").alias(_weathergen_timestamp)
-    )
-    df = df.with_columns(
-        (df[_weathergen_timestamp] - df[_weathergen_timestamp].min()).alias(_weathergen_reltime)
     )
 
     if columns:

@@ -21,13 +21,35 @@ import yaml
 
 import weathergen.common.config as config
 from weathergen.train.utils import TRAIN
-from weathergen.utils.train_logger import Metrics, TrainLogger
+from weathergen.utils.train_logger import Metrics, TrainLogger, _weathergen_reltime
 
 _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
 MAX_FILENAME_LEN = 255
 PLOT_DPI_VALUE = 150
+
+
+####################################################################################################
+def _x_column(columns, x_axis: str, x_type: str) -> str:
+    """Pick the dataframe column to use as the plot x-axis.
+
+    For ``x_type == "reltime"`` the wall-clock time column is used; otherwise the
+    first column matching ``x_axis`` (e.g. "samples") is used.
+    """
+    if x_type == "reltime":
+        return _weathergen_reltime
+    return next(filter(lambda c: x_axis in c, columns))
+
+
+def _x_label(x_axis: str, x_type: str) -> str:
+    """Axis label matching the column chosen by :func:`_x_column`."""
+    return "wall-clock time [h]" if x_type == "reltime" else x_axis
+
+
+def _x_suffix(x_type: str) -> str:
+    """Filename suffix so wall-clock plots don't overwrite step-based ones."""
+    return "_reltime" if x_type == "reltime" else ""
 
 
 def _add_legend(
@@ -231,6 +253,7 @@ def plot_lr(
     runs_active: list[bool],
     plot_dir: Path,
     x_axis: str = "samples",
+    x_type: str = "step",
     legend_outside: bool = False,
     legend_font_size: str = "x-small",
     legend_num_columns: int = 3,
@@ -263,7 +286,7 @@ def plot_lr(
         if run_data.train.is_empty():
             continue
         run_id = run_data.run_id
-        x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
+        x_col = _x_column(run_data.train.columns, x_axis, x_type)
         data_cols = list(filter(lambda c: "learning_rate" in c, run_data.train.columns))
 
         x_vals = run_data.train[x_col]
@@ -284,7 +307,7 @@ def plot_lr(
     plt.yscale("log")
     plt.title("learning rate")
     plt.ylabel("lr")
-    plt.xlabel(x_axis)
+    plt.xlabel(_x_label(x_axis, x_type))
     plt.tight_layout()
     _add_legend(
         legend_str,
@@ -295,11 +318,12 @@ def plot_lr(
     )
     rstr = "".join([f"{r}_" for r in runs_ids])
 
-    if len(rstr) + 6 > MAX_FILENAME_LEN:
-        rstr = rstr[: MAX_FILENAME_LEN - 6]
+    tail = f"lr{_x_suffix(x_type)}.png"
+    if len(rstr) + len(tail) > MAX_FILENAME_LEN:
+        rstr = rstr[: MAX_FILENAME_LEN - len(tail)]
 
     # save the plot
-    plt_fname = plot_dir / f"{rstr}lr.png"
+    plt_fname = plot_dir / f"{rstr}{tail}"
     _logger.info(f"Saving learning rate plot to '{plt_fname}'")
     plt.savefig(plt_fname, bbox_inches="tight")
     plt.close()
@@ -311,6 +335,8 @@ def plot_loss_avg(
     runs_data,
     runs_active,
     stage=TRAIN,
+    x_axis: str = "samples",
+    x_type: str = "step",
     x_scale_log=False,
     legend_outside: bool = False,
     legend_font_size: str = "x-small",
@@ -325,7 +351,8 @@ def plot_loss_avg(
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
         run_data_stage = run_data.train if stage == TRAIN else run_data.val
-        x_vals = np.array(run_data_stage["num_samples"])
+        x_col = _x_column(run_data_stage.columns, x_axis, x_type)
+        x_vals = np.array(run_data_stage[x_col])
         y_vals = np.array(run_data_stage["loss_avg_mean"])
 
         mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_vals))
@@ -347,7 +374,7 @@ def plot_loss_avg(
         plt.xscale("log")
     plt.title("average loss")
     plt.ylabel("loss")
-    plt.xlabel("step")
+    plt.xlabel(_x_label(x_axis, x_type))
     plt.tight_layout()
     _add_legend(
         legend_str,
@@ -358,10 +385,11 @@ def plot_loss_avg(
     )
     rstr = "".join([f"{r}_" for r in runs_ids])
 
-    if len(rstr) + len(f"{str(stage)}_avg.png") > MAX_FILENAME_LEN:
-        rstr = rstr[: MAX_FILENAME_LEN - len(f"{str(stage)}_avg.png")]
+    tail = f"{str(stage)}_avg{_x_suffix(x_type)}.png"
+    if len(rstr) + len(tail) > MAX_FILENAME_LEN:
+        rstr = rstr[: MAX_FILENAME_LEN - len(tail)]
 
-    plt_fname = plot_dir / f"{rstr}{str(stage)}_avg.png"
+    plt_fname = plot_dir / f"{rstr}{tail}"
     _logger.info(f"Saving avg plot to '{plt_fname}'")
     plt.savefig(plt_fname, bbox_inches="tight")
     plt.close()
@@ -441,8 +469,8 @@ def plot_loss_per_stream(
                         run_data_mode = run_data.by_mode(mode)
                         if run_data_mode.is_empty():
                             continue
-                        # find the col of the request x-axis (e.g. samples)
-                        x_col = next(filter(lambda c: x_axis in c, run_data_mode.columns))
+                        # find the col of the request x-axis (e.g. samples, wall-clock)
+                        x_col = _x_column(run_data_mode.columns, x_axis, x_type)
                         # find the cols of the requested metric (e.g. mse) and channel
                         # for all streams
                         data_cols = []
@@ -525,7 +553,7 @@ def plot_loss_per_stream(
                 title_loss = ".".join(title_col.split(".")[:-1])
                 plt.title(title_loss + " (" + ", ".join(modes) + ")")
                 plt.ylabel(err)
-                plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
+                plt.xlabel(_x_label(x_axis, x_type))
                 plt.tight_layout()
                 _add_legend(
                     legend_str,
@@ -537,12 +565,13 @@ def plot_loss_per_stream(
 
                 # construct file name
                 run_ids_str = "".join([f"{r}_" for r in runs_ids])
-                fname_tail = "{}fs_{}{}_{}_{}.png".format(
+                fname_tail = "{}fs_{}{}_{}_{}{}.png".format(
                     "".join([f"{m}_" for m in modes]),
                     "".join([f"{fs}_" for fs in forecast_steps]),
                     err,
                     stream_name,
                     channel,
+                    _x_suffix(x_type),
                 )
                 # ensure file name is not too long
                 if len(run_ids_str) + len(fname_tail) > MAX_FILENAME_LEN:
@@ -570,6 +599,7 @@ def plot_loss_per_run(
     plot_dir: Path,
     errs: list[str] | None = None,
     x_axis: str = "samples",
+    x_type: str = "step",
     x_scale_log: bool = False,
     legend_outside: bool = False,
     legend_font_size: str = "x-small",
@@ -623,7 +653,7 @@ def plot_loss_per_run(
                 alpha = 0.35 if "train" in mode else alpha
             run_data_mode = run_data.by_mode(mode)
 
-            x_col = [c for _, c in enumerate(run_data_mode.columns) if x_axis in c][0]
+            x_col = _x_column(run_data_mode.columns, x_axis, x_type)
             # find the cols of the requested metric (e.g. mse) for all streams
             data_cols = []
             for col in run_data_mode.columns:
@@ -666,7 +696,7 @@ def plot_loss_per_run(
         plt.xscale("log")
     plt.grid(True, which="both", ls="-")
     plt.ylabel("loss")
-    plt.xlabel("samples")
+    plt.xlabel(_x_label(x_axis, x_type))
     plt.tight_layout()
     _add_legend(
         legend_str,
@@ -682,7 +712,7 @@ def plot_loss_per_run(
 
     # save the plot
     fname_base = "{}_{}".format(run_id, "".join([f"{m}_" for m in modes]))
-    fname_suffix = ".png"
+    fname_suffix = f"{_x_suffix(x_type)}.png"
 
     if len(fname_base) + len(sstr) + len(fname_suffix) > MAX_FILENAME_LEN:
         sstr = sstr[: MAX_FILENAME_LEN - len(fname_base) - len(fname_suffix)]
@@ -862,7 +892,7 @@ def plot_train(args=None):
     model_base_dir = Path(args.model_base_dir) if args.model_base_dir else None
     out_dir = Path(args.output_dir)
     streams = list(args.streams)
-    x_types_valid = ["step"]  # TODO: add "reltime" support when fix available
+    x_types_valid = ["step", "reltime"]
     if args.x_type not in x_types_valid:
         raise ValueError(f"x_type must be one of {x_types_valid}, but got {args.x_type}")
 
@@ -924,6 +954,7 @@ def plot_train(args=None):
         runs_data,
         runs_active,
         plot_dir=out_dir,
+        x_type=args.x_type,
         legend_outside=args.legend_outside,
         legend_font_size=args.legend_font_size,
         legend_num_columns=args.legend_num_columns,
@@ -937,6 +968,8 @@ def plot_train(args=None):
         runs_data,
         runs_active,
         stage=TRAIN,
+        x_type=args.x_type,
+        x_scale_log=x_scale_log,
         legend_outside=args.legend_outside,
         legend_font_size=args.legend_font_size,
         legend_num_columns=args.legend_num_columns,
@@ -1013,6 +1046,7 @@ def plot_train(args=None):
                 get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
                 channels=args.channels,
                 plot_dir=out_dir,
+                x_type=args.x_type,
                 legend_outside=args.legend_outside,
                 legend_font_size=args.legend_font_size,
                 legend_num_columns=args.legend_num_columns,
@@ -1026,6 +1060,7 @@ def plot_train(args=None):
             get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
             channels=args.channels,
             plot_dir=out_dir,
+            x_type=args.x_type,
             legend_outside=args.legend_outside,
             legend_font_size=args.legend_font_size,
             legend_num_columns=args.legend_num_columns,
