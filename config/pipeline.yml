@@ -4,10 +4,27 @@ stages:
     config_files:
       - config/config_forecasting_era5_cerra.yml
     options:
-      - training_config.num_mini_epochs=32
+      - training_config.num_mini_epochs=64
       - data_loading.num_workers=8
     chain_jobs: 4
     nodes: 2
+    slurm_args:
+      - "--time=23:59:00"
+
+  - name: inf
+    stage: inference
+    from_run_id : STAGE.pretrain
+    config_files:
+      - config/config_forecasting_era5_cerra_inf.yml
+    options:
+    - training_config.forecast.num_steps=20 
+    - test_config.output.num_samples=10 
+    - test_config.start_date=202310010000 
+    - test_config.end_date=202312300000 
+    - test_config.samples_per_mini_epoch=128
+    - training_config.forecast.chunk_size=1
+    chain_jobs: 2
+    nodes: 1
     slurm_args:
       - "--time=23:59:00"
       

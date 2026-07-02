@@ -79,6 +79,54 @@ def resolve_region_cells(level: int, region: dict) -> NDArray:
     return _buffer_by_rings(selected, level, int(region.get("rings", 0)))
 
 
+def _resolve_region(stream_info):
+    """Encoder region for one stream: its own ``healpix_active_region``, else GLOBAL.
+    """
+    region = stream_info.get("healpix_active_region", None)
+    if OmegaConf.is_config(region):
+        region = OmegaConf.to_container(region, resolve=True)
+    return region
+
+
+def region_for_level(cf, level: int):
+    """Active region for the encoder operating at HEALPix ``level``.
+    """
+    default_level = int(cf.healpix_level)
+    regions = [
+        _resolve_region(si)
+        for si in cf.streams.values()
+        if int(si.get("healpix_level", default_level)) == level
+    ]
+    if not regions:
+        return None
+    # global region (None)
+    if any(not r for r in regions):
+        return None
+    # single shared region 
+    first = regions[0]
+    if all(r == first for r in regions):
+        return first
+    # differing regions at the same level => union of their resolved cell ids
+    return np.concatenate([resolve_region_cells(level, r) for r in regions])
+
+
+def forecast_level(cf) -> int:
+    """Level of the forecast/decode grid (grid_F)
+    """
+    level = cf.get("fe_healpix_level", None)
+    assert level is not None, "config must set 'fe_healpix_level' (the forecast/decode grid level)"
+    return int(level)
+
+
+def forecast_region(cf):
+    """Active region for the forecast/decode grid (grid_F)
+    """
+    region = cf.get("fe_healpix_active_region", cf.get("healpix_active_region", None))
+    if OmegaConf.is_config(region):
+        region = OmegaConf.to_container(region, resolve=True)
+    return region
+
+
 class NativeGrid:
     """Geometry of the native HEALPix grid the encoder operates on.
 
@@ -98,15 +146,16 @@ class NativeGrid:
         Global nested cell id -> active index, ``-1`` for inactive cells.
     """
 
-    def __init__(self, cf, level: int | None = None) -> None:
+    def __init__(self, cf, level: int | None = None, region=None) -> None:
         self.level = int(cf.healpix_level if level is None else level)
         self.num_global = 12 * 4**self.level
 
-        region = cf.get("healpix_active_region", None)
-        if region is not None and OmegaConf.is_config(region):
+        if OmegaConf.is_config(region):
             region = OmegaConf.to_container(region, resolve=True)
 
-        if not region:
+        if isinstance(region, np.ndarray):
+            self.active_to_global = np.unique(region.astype(np.int64))
+        elif not region:
             self.active_to_global = np.arange(self.num_global, dtype=np.int64)
         else:
             self.active_to_global = resolve_region_cells(self.level, region)

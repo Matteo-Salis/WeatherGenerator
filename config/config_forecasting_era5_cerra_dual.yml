@@ -64,10 +64,19 @@ fe_impute_latent_noise_std: 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 
-healpix_level: 5
-healpix_active_region:
+# Experiment B: dual encoding of CERRA. The CERRA_HP5 source-only stream joins ERA5 in the L5
+# encoder (joint encoding as in the baseline); the CERRA hp7 stream is the fine-scale branch.
+fe_healpix_level: 7
+fe_healpix_active_region:
   name: europe
   rings: 1
+
+ae_local_max_tokens_per_cell: 256
+
+# normalize each encoder's regridded latent and gate it before summation; gates are zero-init
+# for levels != fe_healpix_level so training starts from the F-level encoder alone
+encoder_fusion_norm: True
+encoder_fusion_gate: True
 
 
 rope_2D: False
@@ -94,7 +103,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_o96_cerra/"
+streams_directory: "./config/streams/era5_o96_cerra_dual/"
 streams: ???
 
 # type of zarr_store
@@ -247,7 +256,7 @@ wgtags:
   # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
   # Examples: "rollout_ablation_grid"  
-  exp: "pretraining_era5_o96_cerra"
+  exp: "multihp_dual_era5_o96_cerra"
   # *** Experiment-specific tags ***
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.

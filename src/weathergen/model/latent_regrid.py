@@ -9,7 +9,8 @@
 
 """Regrid a per-cell latent between two HEALPix levels (an encoder's grid -> the forecast grid).
 
-- ``L == F``: identity.
+- ``L == F`` with the same active region: identity (a differing region at the same level falls
+  back to a shift-0 active->active gather).
 - ``L  > F`` (encoder finer than forecast): **reduce** -- pool the ``4**(L-F)`` child cells that
   fall under each forecast cell (nested ids: parent = child >> 2*(L-F)). The pooling op is
   configurable (``avg`` default, ``max``, ``sum``).
@@ -20,6 +21,7 @@
 
 import numpy as np
 import torch
+from numpy.typing import NDArray
 
 
 class LatentRegridder(torch.nn.Module):
@@ -32,11 +34,15 @@ class LatentRegridder(torch.nn.Module):
         self.level_src = grid_src.level
         self.level_dst = grid_dst.level
         self.num_dst = grid_dst.num_cells
-        self.mode = (
-            "identity"
-            if self.level_src == self.level_dst
-            else ("reduce" if self.level_src > self.level_dst else "broadcast")
-        )
+        if self.level_src == self.level_dst:
+            same_grid = grid_src.num_cells == grid_dst.num_cells and np.array_equal(
+                grid_src.active_to_global, grid_dst.active_to_global
+            )
+            self.mode = "identity" if same_grid else "broadcast"
+        elif self.level_src > self.level_dst:
+            self.mode = "reduce"
+        else:
+            self.mode = "broadcast"
 
         if self.mode == "reduce":
             shift = 2 * (self.level_src - self.level_dst)
@@ -59,6 +65,14 @@ class LatentRegridder(torch.nn.Module):
             dst_to_src = grid_src.global_to_active[ancestor_global]
             self._dst_to_src_np = dst_to_src
             self.register_buffer("dst_to_src", torch.zeros(len(dst_to_src), dtype=torch.long))
+
+    def dst_coverage(self) -> NDArray:
+        """Boolean mask over destination cells receiving at least one source contribution."""
+        if self.mode == "identity":
+            return np.ones(self.num_dst, dtype=bool)
+        if self.mode == "broadcast":
+            return self._dst_to_src_np >= 0
+        return self._dst_counts_np > 0
 
     def reset_parameters(self) -> None:
         if self.mode == "reduce":

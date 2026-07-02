@@ -28,7 +28,12 @@ from weathergen.datasets.data_reader_base import (
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
-from weathergen.datasets.healpix_grid import NativeGrid
+from weathergen.datasets.healpix_grid import (
+    NativeGrid,
+    forecast_level,
+    forecast_region,
+    region_for_level,
+)
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -109,9 +114,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # initialise healpix native grids
         self.healpix_level = cf.healpix_level
-        F = int(cf.get("fe_healpix_level", cf.healpix_level))
+        F = forecast_level(cf)
         self.fe_healpix_level = F
-        self.grid_F = NativeGrid(cf, level=F)
+        self.grid_F = NativeGrid(cf, level=F, region=forecast_region(cf))
 
         # group streams by their native encoder level (stream config overrides cf default)
         self.stream_level = {
@@ -123,7 +128,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for L in self.encoder_levels
         }
 
-        self.grids = {L: NativeGrid(cf, level=L) for L in self.encoder_levels}
+        self.grids = {
+            L: NativeGrid(cf, level=L, region=region_for_level(cf, L))
+            for L in self.encoder_levels
+        }
         # single shared masker; per-call grids come from each tokenizer's grid_source/grid_target
         self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
         self.tokenizers = {

@@ -64,8 +64,10 @@ fe_impute_latent_noise_std: 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 
-healpix_level: 8
-healpix_active_region:
+# Experiment A: latent/decode on hp5. ERA5 encoder stays
+# global L5, CERRA encoder stays L7 europe (reduce-pooled 7->5 onto grid_F).
+fe_healpix_level: 5
+fe_healpix_active_region:
   name: europe
   rings: 1
 
@@ -94,7 +96,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_o96_cerra_hl8/"
+streams_directory: "./config/streams/era5_o96_cerra/"
 streams: ???
 
 # type of zarr_store
@@ -247,7 +249,7 @@ wgtags:
   # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
   # Examples: "rollout_ablation_grid"  
-  exp: "pretraining_era5_o96_cerra"
+  exp: "multihp_f5_era5_o96_cerra"
   # *** Experiment-specific tags ***
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.

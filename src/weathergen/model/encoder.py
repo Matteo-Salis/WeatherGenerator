@@ -16,7 +16,7 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
-from weathergen.datasets.healpix_grid import NativeGrid
+from weathergen.datasets.healpix_grid import NativeGrid, region_for_level
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.engines import (
     EmbeddingEngine,
@@ -61,7 +61,9 @@ class EncoderModule(torch.nn.Module):
         self.cf = cf
 
         self.healpix_level = cf.healpix_level if level is None else level
-        self.grid = NativeGrid(cf, level=self.healpix_level)
+        self.grid = NativeGrid(
+            cf, level=self.healpix_level, region=region_for_level(cf, self.healpix_level)
+        )
         self.num_healpix_cells = self.grid.num_cells
 
         self.dtype = get_dtype(cf.attention_dtype)
@@ -365,8 +367,8 @@ class EncoderModule(torch.nn.Module):
         # combined cell lens for all tokens in batch across all input steps
         zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
 
-        # subdivision factor for required splitting
-        clen = self.num_healpix_cells // (2 if self.healpix_level <= 5 else 8)
+        # subdivision factor for required splitting; small regional grids must not chunk to zero
+        clen = max(1, self.num_healpix_cells // (2 if self.healpix_level <= 5 else 8))
         tokens_global_unmasked = []
         posteriors = []
 

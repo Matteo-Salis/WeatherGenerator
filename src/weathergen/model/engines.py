@@ -16,7 +16,7 @@ from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
-from weathergen.datasets.healpix_grid import NativeGrid
+from weathergen.datasets.healpix_grid import NativeGrid, forecast_level, forecast_region
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
@@ -562,14 +562,10 @@ class ForecastingEngine(torch.nn.Module):
         super(ForecastingEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
-        self.grid = NativeGrid(cf)
+        self.grid = NativeGrid(cf, level=forecast_level(cf), region=forecast_region(cf))
         self.fe_blocks = torch.nn.ModuleList()
         self.rope_2D = cf.get("rope_2D", False)
-        self.healpix_level = (
-            cf.get("fe_healpix_level")
-            if cf.get("fe_healpix_level") is not None
-            else cf.get("healpix_level")
-        )
+        self.healpix_level = forecast_level(cf)
         self.dtype = get_dtype(cf.attention_dtype)
 
         # RoPE coordinates

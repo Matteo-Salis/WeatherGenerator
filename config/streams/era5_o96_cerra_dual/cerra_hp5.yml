@@ -7,14 +7,17 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-CERRA :
-  healpix_level: 9
+# Source-only duplicate of CERRA on the L5 encoder: CERRA and ERA5 are then encoded jointly at
+# hp5 (as in the joint baseline) while the CERRA stream at hp7 acts as a fine-scale branch.
+# forcing: True => no targets, no decoder, no loss contribution.
+CERRA_HP5 :
+  healpix_level: 5
   type : anemoi
   filenames : ['cerra-rr-an-oper-se-al-ec-mars-5p5km-1985-2023-3h-v2.zarr']
   frequency : 6h
-  stream_id : 1
+  stream_id : 2
+  forcing : True
   source_exclude : ['skt','tciwv','tp','al','rsn','sde','sf']
-  #source: []
   target_exclude : ['tciwv','tp','al','rsn','sde','sf']
   geoinfo_channels : ['orog', 'lsm']
   diagnostic: False
@@ -25,8 +28,7 @@ CERRA :
   token_size : 64
   tokenize_spacetime : True
   max_num_targets: 570000
-  #max_num_targets: -1 
-  embed : 
+  embed :
     net : transformer
     num_tokens : 1
     num_heads : 8

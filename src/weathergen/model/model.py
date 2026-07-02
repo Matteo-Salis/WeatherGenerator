@@ -20,7 +20,12 @@ from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
-from weathergen.datasets.healpix_grid import NativeGrid
+from weathergen.datasets.healpix_grid import (
+    NativeGrid,
+    forecast_level,
+    forecast_region,
+    region_for_level,
+)
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -88,8 +93,8 @@ class ModelParams(torch.nn.Module):
 
         self.cf = cf
 
-        F = int(cf.get("fe_healpix_level", cf.healpix_level))
-        self.grid = NativeGrid(cf, level=F)
+        F = forecast_level(cf)
+        self.grid = NativeGrid(cf, level=F, region=forecast_region(cf))
         self.healpix_level = F
         self.num_healpix_cells = self.grid.num_cells
         self.hp_nbours = torch.nn.Parameter(
@@ -162,8 +167,8 @@ class Model(torch.nn.Module):
         """
         super(Model, self).__init__()
 
-        F = int(cf.get("fe_healpix_level", cf.healpix_level))
-        self.grid = NativeGrid(cf, level=F)
+        F = forecast_level(cf)
+        self.grid = NativeGrid(cf, level=F, region=forecast_region(cf))
         self.healpix_level = F
         self.num_healpix_cells = self.grid.num_cells
 
@@ -176,6 +181,9 @@ class Model(torch.nn.Module):
         self.embed_target_coords = None
         self.encoders: torch.nn.ModuleDict | None = None
         self.regridders: torch.nn.ModuleDict | None = None
+        self.fusion_norms: torch.nn.ModuleDict | None = None
+        self.fusion_gates: torch.nn.ParameterDict | None = None
+        self.register_buffer("fusion_cell_counts", None)
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
@@ -250,6 +258,43 @@ class Model(torch.nn.Module):
             )
             self.encoders[str(L)] = enc
             self.regridders[str(L)] = LatentRegridder(enc.grid, self.grid, reduce_op=reduce_op)
+            if is_root():
+                region = "global" if enc.grid.is_full else region_for_level(cf, L)
+                logger.info(
+                    f"encoder L={L}: {enc.num_healpix_cells}/{enc.grid.num_global} active cells"
+                    f" ({region}), streams {list(streams_L.keys())},"
+                    f" regrid to F: {self.regridders[str(L)].mode}"
+                )
+
+        F = forecast_level(cf)
+        self.fusion_level_F = F
+        if is_root():
+            region = "global" if self.grid.is_full else forecast_region(cf)
+            logger.info(
+                f"grid_F L={F}: {self.grid.num_cells}/{self.grid.num_global} active cells"
+                f" ({region})"
+            )
+
+        # every grid_F cell must be fed by at least one encoder branch
+        coverage = np.sum([r.dst_coverage() for r in self.regridders.values()], axis=0)
+        assert coverage.min() >= 1, (
+            f"{int((coverage == 0).sum())} forecast-grid cells receive no contribution from any "
+            "encoder; check the streams' healpix_active_region against fe_healpix_active_region"
+        )
+        if cf.get("encoder_fusion_count_norm", False):
+            self._fusion_counts_np = coverage.astype(np.float32)
+            self.fusion_cell_counts = torch.zeros(self.num_healpix_cells)
+        if cf.get("encoder_fusion_norm", False):
+            self.fusion_norms = torch.nn.ModuleDict(
+                {
+                    str(L): torch.nn.LayerNorm(cf.ae_global_dim_embed, eps=float(cf.norm_eps))
+                    for L in levels
+                }
+            )
+        if cf.get("encoder_fusion_gate", False):
+            self.fusion_gates = torch.nn.ParameterDict(
+                {str(L): torch.nn.Parameter(torch.empty(1)) for L in levels}
+            )
 
         mode_cfg = cf.training_config
         if cf.fe_num_blocks > 0:
@@ -468,6 +513,11 @@ class Model(torch.nn.Module):
         if self.regridders is not None:
             for regridder in self.regridders.values():
                 regridder.reset_parameters()
+        if self.fusion_gates is not None:
+            for L_str, gate in self.fusion_gates.items():
+                torch.nn.init.constant_(gate, 1.0 if int(L_str) == self.fusion_level_F else 0.0)
+        if self.fusion_cell_counts is not None:
+            self.fusion_cell_counts.data.copy_(torch.from_numpy(self._fusion_counts_np))
         if self.forecast_engine is not None:
             self.forecast_engine.reset_parameters()
 
@@ -582,11 +632,21 @@ class Model(torch.nn.Module):
             aux_L = tokens_L[:, :num_aux]
             cells_L = tokens_L[:, num_aux:]
             cells_F = self.regridders[L_str](cells_L)
+            if self.fusion_norms is not None:
+                cells_F = self.fusion_norms[L_str](cells_F)
+                aux_L = self.fusion_norms[L_str](aux_L)
+            if self.fusion_gates is not None:
+                cells_F = self.fusion_gates[L_str] * cells_F
+                aux_L = self.fusion_gates[L_str] * aux_L
             fused_cells = cells_F if fused_cells is None else fused_cells + cells_F
             fused_aux = aux_L if fused_aux is None else fused_aux + aux_L
             posteriors = posteriors + (
                 posteriors_L if isinstance(posteriors_L, list) else [posteriors_L]
             )
+        if self.fusion_cell_counts is not None:
+            counts = self.fusion_cell_counts.view(1, -1, 1, 1).to(fused_cells.dtype)
+            fused_cells = fused_cells / counts
+            fused_aux = fused_aux / len(self.encoders)
         fused = torch.cat([fused_aux, fused_cells], dim=1).flatten(1, 2)
         return fused, posteriors
 
@@ -606,7 +666,12 @@ class Model(torch.nn.Module):
         tokens, posteriors = self.encode_and_fuse(batch)
         output.add_latent_prediction(0, "posteriors", posteriors)
 
-        # recover batch dimension and separate input_steps
+        assert len(batch) == 1 or batch.get_num_steps() == 1, (
+            "batch_size > 1 combined with multiple input steps requires fixing the "
+            "step-major/batch-major reshape here"
+        )
+        
+        # recover batch dimension and separate input_steps        
         shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
