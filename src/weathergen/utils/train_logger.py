@@ -31,6 +31,12 @@ _weathergen_timestamp = "weathergen.timestamp"
 _weathergen_reltime = "weathergen.reltime"
 _weathergen_time = "weathergen.time"
 
+# Inter-log intervals larger than this multiple of the run's median logging
+# interval are treated as idle time (a continued run's SLURM job sitting in the
+# queue + preprocessing before it resumes) rather than training, and collapsed
+# to a single normal interval so they don't inflate the wall-clock-time axis.
+_RELTIME_GAP_FACTOR = 10
+
 _logger = logging.getLogger(__name__)
 
 RunId = str
@@ -198,11 +204,24 @@ def read_metrics(
         for col_pattern in cols_patterns:
             cols += [col for col in df.columns if col_pattern in col]
 
-    # Wall-clock time (in hours) relative to the run start. Computed *before*
-    # filtering by stage so train and val share the same clock, i.e. val curves
-    # are offset by the time already spent training before each validation.
-    ts = df[_weathergen_timestamp]
-    df = df.with_columns(((ts - ts.min()) / 3_600_000.0).alias(_weathergen_reltime))
+    # Wall-clock *training* time (hours): the cumulative sum of inter-log
+    # intervals, with idle gaps (a continued run's next SLURM job waiting in the
+    # queue + preprocessing before it resumes) collapsed to a single normal
+    # interval so only time actually spent training is counted. Computed on the
+    # chronologically sorted full file so train and val share the same clock.
+    df = df.sort(_weathergen_timestamp)
+    median_dt = df[_weathergen_timestamp].diff().median()
+    if median_dt is None:  # single logged step, nothing to accumulate
+        df = df.with_columns(pl.lit(0.0).alias(_weathergen_reltime))
+    else:
+        dt = pl.col(_weathergen_timestamp).diff()
+        dt_active = (
+            pl.when(dt > _RELTIME_GAP_FACTOR * median_dt)
+            .then(pl.lit(median_dt))
+            .otherwise(dt)
+            .fill_null(0)
+        )
+        df = df.with_columns((dt_active.cum_sum() / 3_600_000.0).alias(_weathergen_reltime))
 
     if stage is not None:
         df = df.filter(pl.col("stage") == stage)
