@@ -324,19 +324,8 @@ class Trainer(TrainerBase):
         beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
         eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
 
-        # scalar fusion gates directly scale an entire encoder branch; weight decay would pull
-        # them toward zero and fight the gated blend-in of the non-forecast-level encoders
-        gate_params = [p for n, p in self.model.named_parameters() if "fusion_gates" in n]
-        if gate_params:
-            gate_ids = {id(p) for p in gate_params}
-            params = [
-                {"params": [p for p in self.model.parameters() if id(p) not in gate_ids]},
-                {"params": gate_params, "weight_decay": 0.0},
-            ]
-        else:
-            params = self.model.parameters()
         self.optimizer = torch.optim.AdamW(
-            params,
+            self.model.parameters(),
             lr=self.training_cfg.learning_rate_scheduling.lr_start,
             weight_decay=self.training_cfg.optimizer.weight_decay,
             betas=(beta1, beta2),

@@ -39,6 +39,7 @@ from weathergen.model.engines import (
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
+from weathergen.model.fusion import create_fusion_module
 from weathergen.model.latent_regrid import LatentRegridder
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
@@ -182,8 +183,7 @@ class Model(torch.nn.Module):
         self.encoders: torch.nn.ModuleDict | None = None
         self.regridders: torch.nn.ModuleDict | None = None
         self.fusion_norms: torch.nn.ModuleDict | None = None
-        self.fusion_gates: torch.nn.ParameterDict | None = None
-        self.register_buffer("fusion_cell_counts", None)
+        self.fusion: torch.nn.Module | None = None
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
@@ -235,7 +235,8 @@ class Model(torch.nn.Module):
 
         # group streams by their native encoder level (per-stream override, default healpix_level);
         # streams sharing a level share an encoder. The per-encoder latents are regridded onto the
-        # single forecast grid (level F = fe_healpix_level) and summed in encode_and_fuse.
+        # single forecast grid (level F = fe_healpix_level) and fused in encode_and_fuse
+        # (strategy selected via encoder_fusion_mode).
         stream_names = list(cf.streams.keys())
         level_of = {
             n: int(cf.streams[n].get("healpix_level", cf.healpix_level)) for n in stream_names
@@ -276,14 +277,12 @@ class Model(torch.nn.Module):
             )
 
         # every grid_F cell must be fed by at least one encoder branch
-        coverage = np.sum([r.dst_coverage() for r in self.regridders.values()], axis=0)
+        coverage_masks = np.stack([r.dst_coverage() for r in self.regridders.values()])
+        coverage = coverage_masks.sum(axis=0)
         assert coverage.min() >= 1, (
             f"{int((coverage == 0).sum())} forecast-grid cells receive no contribution from any "
             "encoder; check the streams' healpix_active_region against fe_healpix_active_region"
         )
-        if cf.get("encoder_fusion_count_norm", False):
-            self._fusion_counts_np = coverage.astype(np.float32)
-            self.fusion_cell_counts = torch.zeros(self.num_healpix_cells)
         if cf.get("encoder_fusion_norm", False):
             self.fusion_norms = torch.nn.ModuleDict(
                 {
@@ -291,10 +290,7 @@ class Model(torch.nn.Module):
                     for L in levels
                 }
             )
-        if cf.get("encoder_fusion_gate", False):
-            self.fusion_gates = torch.nn.ParameterDict(
-                {str(L): torch.nn.Parameter(torch.empty(1)) for L in levels}
-            )
+        self.fusion = create_fusion_module(cf, coverage_masks)
 
         mode_cfg = cf.training_config
         if cf.fe_num_blocks > 0:
@@ -513,11 +509,8 @@ class Model(torch.nn.Module):
         if self.regridders is not None:
             for regridder in self.regridders.values():
                 regridder.reset_parameters()
-        if self.fusion_gates is not None:
-            for L_str, gate in self.fusion_gates.items():
-                torch.nn.init.constant_(gate, 1.0 if int(L_str) == self.fusion_level_F else 0.0)
-        if self.fusion_cell_counts is not None:
-            self.fusion_cell_counts.data.copy_(torch.from_numpy(self._fusion_counts_np))
+        if self.fusion is not None:
+            self.fusion.reset_parameters()
         if self.forecast_engine is not None:
             self.forecast_engine.reset_parameters()
 
@@ -589,6 +582,7 @@ class Model(torch.nn.Module):
         print(f" Learnable queries: {num_params_q_cells:,}")
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
+        print(f" Encoder fusion: {get_num_parameters(self.fusion):,}")
         print(f" Latent prediction heads and pre-norm: {num_params_latent_heads:,}")
         print(f" Forecast engine: {num_params_fe:,}")
         print(" coordinate embedding, prediction networks and prediction heads:")
@@ -616,13 +610,14 @@ class Model(torch.nn.Module):
         )
 
     def encode_and_fuse(self, batch):
-        """Run each per-level encoder, regrid its cell latents onto grid_F, and sum.
+        """Run each per-level encoder, regrid its cell latents onto grid_F, and fuse them
+        with the strategy selected via encoder_fusion_mode.
 
         Returns (fused_tokens (rs, (num_aux+num_cells_F)*Q, dim), posteriors_list)."""
         Q = self.cf.ae_local_num_queries
         num_aux = self.num_aux_tokens
-        fused_cells = None
-        fused_aux = None
+        cells_list = []
+        aux_list = []
         posteriors = []
         for L_str, encoder in self.encoders.items():
             tokens_L, posteriors_L = encoder(batch, batch.tokens_lens_by_level[int(L_str)])
@@ -635,18 +630,12 @@ class Model(torch.nn.Module):
             if self.fusion_norms is not None:
                 cells_F = self.fusion_norms[L_str](cells_F)
                 aux_L = self.fusion_norms[L_str](aux_L)
-            if self.fusion_gates is not None:
-                cells_F = self.fusion_gates[L_str] * cells_F
-                aux_L = self.fusion_gates[L_str] * aux_L
-            fused_cells = cells_F if fused_cells is None else fused_cells + cells_F
-            fused_aux = aux_L if fused_aux is None else fused_aux + aux_L
+            cells_list.append(cells_F)
+            aux_list.append(aux_L)
             posteriors = posteriors + (
                 posteriors_L if isinstance(posteriors_L, list) else [posteriors_L]
             )
-        if self.fusion_cell_counts is not None:
-            counts = self.fusion_cell_counts.view(1, -1, 1, 1).to(fused_cells.dtype)
-            fused_cells = fused_cells / counts
-            fused_aux = fused_aux / len(self.encoders)
+        fused_cells, fused_aux = self.fusion(cells_list, aux_list)
         fused = torch.cat([fused_aux, fused_cells], dim=1).flatten(1, 2)
         return fused, posteriors
 
@@ -670,8 +659,8 @@ class Model(torch.nn.Module):
             "batch_size > 1 combined with multiple input steps requires fixing the "
             "step-major/batch-major reshape here"
         )
-        
-        # recover batch dimension and separate input_steps        
+
+        # recover batch dimension and separate input_steps
         shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
