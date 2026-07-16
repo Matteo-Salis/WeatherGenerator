@@ -69,6 +69,9 @@ fe_healpix_active_region:
   name: europe
   rings: 1
 
+encoder_fusion_mode: sum # "sum", "concat_mlp", "perceiver"
+encoder_fusion_norm: False # per-level LayerNorm on each encoder's regridded latent before fusion
+encoder_fusion_reduce: avg # "avg", "max", "sum"
 
 rope_2D: False
 
