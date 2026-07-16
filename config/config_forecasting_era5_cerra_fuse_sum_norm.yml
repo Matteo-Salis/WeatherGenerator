@@ -100,7 +100,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_o96_cerra_dual/"
+streams_directory: "./config/streams/era5_o96_cerra/"
 streams: ???
 
 # type of zarr_store

@@ -65,21 +65,16 @@ fe_impute_latent_noise_std: 1e-4
 forecast_att_dense_rate: 1.0
 
 
-fe_healpix_level: 5
+fe_healpix_level: 7
 fe_healpix_active_region:
   name: europe
   rings: 1
 
 ae_local_max_tokens_per_cell: 256
 
-encoder_fusion_mode: concat_mlp # "sum", "concat_mlp", "perceiver"
+encoder_fusion_mode: sum # "sum", "concat_mlp", "perceiver"
 encoder_fusion_norm: True # per-level LayerNorm on each encoder's regridded latent before fusion
 encoder_fusion_reduce: avg # "avg", "max", "sum"
-# concat_mlp: concat latents over hidden dim (n_enc * ae_global_dim_embed) -> MLP -> dim;
-# with residual, the final MLP layer is zero-init so training starts at the additive baseline
-encoder_fusion_mlp_num_layers: 2
-encoder_fusion_mlp_hidden_factor: 1.0
-encoder_fusion_mlp_residual: True
 
 rope_2D: False
 
@@ -105,7 +100,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_o96_cerra/"
+streams_directory: "./config/streams/era5_o96_cerra_dual/"
 streams: ???
 
 # type of zarr_store
@@ -258,7 +253,7 @@ wgtags:
   # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
   # Examples: "rollout_ablation_grid"
-  exp: "multihp_fuse_concat"
+  exp: "multihp_dual_era5_o96_cerra"
   # *** Experiment-specific tags ***
   # All extra tags (including lists, dictionaries, etc.) are treated
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
