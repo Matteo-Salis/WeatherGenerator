@@ -26,7 +26,6 @@ from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
     TIndex,
 )
-from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.healpix_grid import (
     NativeGrid,
@@ -169,6 +168,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.step_timedelta,
         )
 
+        # needed as offset for permutations
+        source_cfgs = self.mode_cfg.get("model_input")
+        self.max_input_steps = np.array(
+            [sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()]
+        ).max()
+
         self.time_window_handler = tw
         if is_root():
             logger.info(self.time_window_handler)
@@ -253,15 +258,15 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         perms_len = int(self.index_range.end - self.index_range.start)
         perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
 
-        return np.arange(perms_len)
+        return np.arange(self.max_input_steps, perms_len)
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
         """Load dataset readers for all streams from config."""
         streams_datasets: dict[StreamName, _Stream] = {}
         for stream_name, stream_info in cf.streams.items():
+            stream_info["data_paths"] = cf.get("data_paths", [])
             # list of sources for current stream
             streams_datasets[stream_name] = _Stream(stream_info, [])
-
             kwargs = {
                 "tw_handler": self.time_window_handler,
                 "stream_info": stream_info,
@@ -273,8 +278,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     dataset = DataReaderObs
                 case "anemoi":
                     dataset = DataReaderAnemoi
-                case "fesom":
-                    dataset = DataReaderFesom
                 case type_name:
                     dataset = get_extra_reader(type_name)
                     if dataset is None:
@@ -282,7 +285,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"for stream name '{stream_name}'."
                         raise ValueError(msg)
 
-            for fname in stream_info["filenames"]:
+            for fname in stream_info.get("filenames", [pathlib.Path()]):
                 fname = pathlib.Path(fname)
                 # dont check if file exists since zarr stores might be directories
                 if fname.exists():
@@ -291,16 +294,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 else:
                     filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
 
-                    if not any(filename.exists() for filename in filenames):  # see above
+                    filename = next((f for f in filenames if f.exists()), None)
+                    if filename is None:
                         msg = (
                             f"Did not find input data for {stream_info['type']} "
                             f"stream '{stream_name}': {filenames}."
                         )
                         raise FileNotFoundError(msg)
-
-                    # The same dataset can exist on different locations in the filesystem,
-                    # so we need to choose here.
-                    filename = filenames[0]
 
                 ds_type = stream_info["type"]
                 if is_root():
@@ -477,8 +477,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     mask,
                 )
 
-                # collect data for stream
-                stream_data.add_source(step, rdata, source_cells_lens, source_cells)
+                stream_data.add_source(
+                    self._stage, step, rdata, source_cells_lens, source_cells, rdata.is_spoof
+                )
 
         return stream_data
 
@@ -520,7 +521,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_coords(timestep_idx, tc, tc_l, rdata.is_spoof)
+                stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
 
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = tok.get_target_values(
@@ -530,8 +531,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
+
                 stream_data.add_target_values(
-                    timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
+                    self._stage, timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
                 )
 
         return stream_data

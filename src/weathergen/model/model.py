@@ -655,13 +655,13 @@ class Model(torch.nn.Module):
         tokens, posteriors = self.encode_and_fuse(batch)
         output.add_latent_prediction(0, "posteriors", posteriors)
 
-        assert len(batch) == 1 or batch.get_num_steps() == 1, (
+        assert len(batch) == 1 or batch.get_num_source_steps() == 1, (
             "batch_size > 1 combined with multiple input steps requires fixing the "
             "step-major/batch-major reshape here"
         )
 
         # recover batch dimension and separate input_steps
-        shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+        shape = (len(batch), batch.get_num_source_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
