@@ -71,7 +71,7 @@ fe_healpix_active_region:
   rings: 1
 
 encoder_fusion_mode: sum # "sum", "concat_mlp", "perceiver"
-encoder_fusion_norm: True # per-level LayerNorm on each encoder's regridded latent before fusion
+encoder_fusion_norm: False # per-level LayerNorm on each encoder's regridded latent before fusion
 encoder_fusion_reduce: avg # "avg", "max", "sum"
 
 rope_2D: False
@@ -87,9 +87,9 @@ norm_eps: 1e-4
 
 latent_noise_kl_weight: 0.0 # 1e-5
 latent_noise_gamma: 2.0
-latent_noise_saturate_encodings: 5
+latent_noise_saturate_encodings: 5 
 latent_noise_use_additive_noise: False
-latent_noise_deterministic_latents: True
+latent_noise_deterministic_latents: True 
 
 freeze_modules: ""
 load_chkpt: {}
@@ -111,13 +111,13 @@ general:
   rank: ???
   world_size: ???
 
-  # local_rank,
+  # local_rank, 
   with_ddp: True
-  # data_path_*,
-  # model_path,
-  # run_path,
+  # data_path_*, 
+  # model_path, 
+  # run_path, 
   # path_shared_
-
+  
   multiprocessing_method: "fork"
 
   desc: ""
@@ -140,7 +140,7 @@ data_loading :
 
 # config for training
 training_config:
-
+  
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
@@ -153,7 +153,7 @@ training_config:
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
-
+  
   learning_rate_scheduling :
     lr_start: 1e-6
     lr_max: 5e-5
@@ -182,7 +182,7 @@ training_config:
         loss_fcts: { "mse": { }, },
         },
     }
-
+  
   model_input: {
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
@@ -198,16 +198,16 @@ training_config:
 
 
 # validation config; full validation config is merge of training and validation config
-validation_config:
+validation_config: 
 
   samples_per_mini_epoch: 256
   shuffle: False
 
   start_date: 2023-10-01T00:00
   end_date: 2023-12-31T00:00
-
+  
   # whether to track the exponential moving average of weights for validation
-  validate_with_ema:
+  validate_with_ema: 
     enabled : True
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
@@ -238,11 +238,11 @@ validation_config:
 # - do not use long strings in values (less than 20 characters is a good rule of thumb, we may enforce this in the future)
 wgtags:
   # The name of the organization of the person running the experiment.
-  # This may be autofilled in the future. Expected values are lowercase strings
+  # This may be autofilled in the future. Expected values are lowercase strings 
   # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
   org: "knmi-mf"
   # The Github issue corresponding to this run (number such as 1234)
-  # Github issues are the central point when running experiment and contain
+  # Github issues are the central point when running experiment and contain 
   # links to hedgedocs, code branches, pull requests etc.
   # It is recommended to associate a run with a Github issue.
   issue: null
@@ -250,9 +250,9 @@ wgtags:
   # This is expected to be the primary tag for comparing experiments in MLFlow, along with the
   # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
-  # Examples: "rollout_ablation_grid"
-  exp: "multihp_fuse_sum_norm"
+  # Examples: "rollout_ablation_grid"  
+  exp: "multihp_f5_era5_o96_cerra"
   # *** Experiment-specific tags ***
-  # All extra tags (including lists, dictionaries, etc.) are treated
+  # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
   grid: null

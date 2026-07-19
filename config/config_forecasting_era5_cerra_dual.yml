@@ -65,15 +65,15 @@ fe_impute_latent_noise_std: 1e-4
 forecast_att_dense_rate: 1.0
 
 
-fe_healpix_level: 7
+fe_healpix_level: 5
 fe_healpix_active_region:
-  name: europe
+  name: cerra
   rings: 1
 
 ae_local_max_tokens_per_cell: 256
 
 encoder_fusion_mode: sum # "sum", "concat_mlp", "perceiver"
-encoder_fusion_norm: True # per-level LayerNorm on each encoder's regridded latent before fusion
+encoder_fusion_norm: False # per-level LayerNorm on each encoder's regridded latent before fusion
 encoder_fusion_reduce: avg # "avg", "max", "sum"
 
 rope_2D: False

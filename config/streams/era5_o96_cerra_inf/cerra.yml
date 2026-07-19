@@ -10,7 +10,7 @@
 CERRA :
   healpix_level: 7
   healpix_active_region:
-    name: europe
+    name: cerra
     rings: 1
   type : anemoi
   filenames : ['cerra-rr-an-oper-se-al-ec-mars-5p5km-1985-2023-3h-v2.zarr']

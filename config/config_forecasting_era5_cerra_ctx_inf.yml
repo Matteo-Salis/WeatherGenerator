@@ -8,4 +8,4 @@ test_config:
   samples_per_mini_epoch: 120
   forecast:
     num_steps: 9
-streams_directory: ./config/streams/era5_o96_cerra_inf/
+streams_directory: ./config/streams/era5_o96_cerra_ctx_inf/
