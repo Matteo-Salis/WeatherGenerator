@@ -26,12 +26,14 @@ from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.bar_plots import BarPlots
 from weathergen.evaluate.plotting.line_plots import LinePlots
+from weathergen.evaluate.plotting.pdf_merge import merge_pdf_subdirectories
 from weathergen.evaluate.plotting.plot_orchestration_utils import (
     _compute_ranges,
     _compute_scores,
     group_by_init_hour,
 )
 from weathergen.evaluate.plotting.plot_utils import (
+    PlotSubdir,
     bar_plot_metric_region,
     heat_maps_metric_region,
     plot_metric_region,
@@ -686,6 +688,18 @@ def _dispatch_timeseries_plots(
 # ---------------------------------------------------------------------------
 # Per-sample map / histogram plots
 # ---------------------------------------------------------------------------
+def _select_ensemble_data(da: xr.DataArray, ens):
+    """Return ensemble member, mean or std view of a DataArray."""
+    if "ens" not in da.dims:
+        return da
+
+    if ens == "mean":
+        return da.mean(dim="ens")
+
+    if ens == "std":
+        return da.std(dim="ens")
+
+    return da.sel(ens=ens)
 
 
 def _plot_single_sample(
@@ -705,12 +719,14 @@ def _plot_single_sample(
     plot_histograms: bool | str,
     maps_config: dict,
     bias_config: dict,
+    std_config: dict,
 ) -> None:
     """Plot all maps/histograms for a single (fstep, sample) pair (loky worker)."""
     matplotlib.use("Agg")
 
     maps_cfg = oc.OmegaConf.create(maps_config)
     bias_cfg = oc.OmegaConf.create(bias_config)
+    std_cfg = oc.OmegaConf.create(std_config)
     plotter = Plotter(plotter_cfg, Path(output_basedir))
 
     data_selection = {"sample": sample, "stream": stream, "forecast_step": fstep}
@@ -726,18 +742,21 @@ def _plot_single_sample(
             plotter.create_maps_per_sample(bias_data, plot_chs, data_selection, "bias", bias_cfg)
 
     for ens in ensemble:
-        has_ens = "ens" in preds.dims and ens != "mean"
-        preds_ens = preds.sel(ens=ens) if has_ens else preds
-        preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
+        preds_ens = _select_ensemble_data(preds, ens)
+        if ens in ("mean", "std"):
+            preds_tag = f"ens_{ens}"
+        else:
+            preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
         preds_name = "_".join(filter(None, ["preds", preds_tag]))
 
         if plot_maps:
+            cfg_to_use = std_cfg if ens == "std" else maps_cfg
             plotter.create_maps_per_sample(
-                preds_ens, plot_chs, data_selection, preds_name, maps_cfg
+                preds_ens, plot_chs, data_selection, preds_name, cfg_to_use
             )
 
             if plot_bias and bias_has_ens:
-                bias_ens = bias_data.sel(ens=ens) if ens != "mean" else bias_data
+                bias_ens = _select_ensemble_data(bias_data, ens)
                 bias_tag = "_".join(filter(None, ["bias", preds_tag]))
                 plotter.create_maps_per_sample(
                     bias_ens, plot_chs, data_selection, bias_tag, bias_cfg
@@ -784,9 +803,12 @@ def _plot_all_samples(
     data_selection = {"sample": "all_samples", "stream": stream, "forecast_step": fstep}
 
     for ens in ensemble:
-        has_ens = "ens" in preds.dims and ens != "mean"
-        preds_ens = preds.sel(ens=ens) if has_ens else preds
-        preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
+        preds_ens = _select_ensemble_data(preds, ens)
+
+        if ens in ("mean", "std"):
+            preds_tag = f"ens_{ens}"
+        else:
+            preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
         preds_name = "_".join(filter(None, ["preds", preds_tag]))
 
         plotter.create_histograms(
@@ -919,6 +941,27 @@ def plot_data(
     maps_config_dict = oc.OmegaConf.to_container(common_ranges(*_range_args), resolve=True)
     bias_config_dict = oc.OmegaConf.to_container(bias_ranges(*_range_args), resolve=True)
 
+    has_ens = any("ens" in da.dims for da in da_preds.values())
+
+    if has_ens:
+        std_preds = {fs: da.std(dim="ens") for fs, da in da_preds.items()}
+
+        std_config_dict = oc.OmegaConf.to_container(
+            common_ranges(
+                std_preds,
+                std_preds,
+                available_data.channels,
+                global_plotting_opts[stream],
+            ),
+            resolve=True,
+        )
+
+        for cfg in std_config_dict.values():
+            if isinstance(cfg, dict):
+                cfg["colormap"] = "YlOrRd"
+    else:
+        std_config_dict = maps_config_dict
+
     num_plot_workers = get_num_workers(
         check_process_headroom=True,
         max_workers=reader.eval_cfg.get("max_workers", None),
@@ -983,6 +1026,7 @@ def plot_data(
                     "plot_histograms": plot_histograms,
                     "maps_config": maps_config_dict,
                     "bias_config": bias_config_dict,
+                    "std_config": std_config_dict,
                 }
             )
 
@@ -1045,12 +1089,18 @@ def plot_data(
 
         tags: list[str] = []
         for ens in available_data.ensemble:
-            tags.append("preds" if not has_ens else f"preds_ens_{ens}")
+            if ens in ("mean", "std"):
+                tags.append(f"preds_ens_{ens}")
+            else:
+                tags.append("preds" if not has_ens else f"preds_ens_{ens}")
         if plot_target:
             tags.append("targets")
         if plot_bias:
             for ens in available_data.ensemble:
-                tags.append("bias" if not has_ens else f"bias_ens_{ens}")
+                if ens in ("mean", "std"):
+                    tags.append(f"bias_ens_{ens}")
+                else:
+                    tags.append("bias" if not has_ens else f"bias_ens_{ens}")
 
         for tag in tags:
             _dispatch_animations(**anim_kw, tag=tag)
@@ -1187,24 +1237,56 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         "baseline": eval_opt.get("baseline", None),
     }
 
-    plotter = LinePlots(plot_cfg, summary_dir)
-    sc_plotter = ScoreCards(plot_cfg, summary_dir)
-    br_plotter = BarPlots(plot_cfg, summary_dir)
-    quantile_plotter = QuantilePlots(plot_cfg, summary_dir)
+    # Prefix the output directory with a run_ids identifier so that
+    # different evaluation configs can coexist in the same base directory.
+    run_ids_str = "_".join(sorted(runs.keys()))
+    output_basedir = summary_dir / run_ids_str
+
+    plotter = LinePlots(plot_cfg, output_basedir)
+    sc_plotter = ScoreCards(plot_cfg, output_basedir)
+    br_plotter = BarPlots(plot_cfg, output_basedir)
+    quantile_plotter = QuantilePlots(plot_cfg, output_basedir)
+
+    # Map each eval option to whether it's enabled and which subdir(s) it produces,
+    # so the flag is only looked up once and reused for both plotting and PDF merging.
+    plot_option_subdirs = {
+        "summary_plots": [PlotSubdir.line_plots, PlotSubdir.psd_plots, PlotSubdir.qq_plots],
+        "ratio_plots": [PlotSubdir.ratio_plots],
+        "score_cards": [PlotSubdir.score_cards],
+        "bar_plots": [PlotSubdir.bar_plots],
+    }
+    enabled_opts = {opt: eval_opt.get(opt, False) for opt in plot_option_subdirs}
+
     for metric in metrics:
         for region in scores_dict[metric].keys():
-            if eval_opt.get("summary_plots", False):
+            # Set metric/region subdirectory for all plotters
+            plotter.set_subdir(metric, region)
+            sc_plotter.set_subdir(metric, region)
+            br_plotter.set_subdir(metric, region)
+            quantile_plotter.set_subdir(metric, region)
+
+            if enabled_opts["summary_plots"]:
                 if metric == "psd":
                     psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
                 elif metric == "qq_analysis":
                     quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
                 else:
                     plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
-            if eval_opt.get("ratio_plots", False):
+            if enabled_opts["ratio_plots"]:
                 ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("heat_maps", False):
                 heat_maps_metric_region(metric, region, runs, scores_dict, plotter)
-            if eval_opt.get("score_cards", False):
+            if enabled_opts["score_cards"]:
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
-            if eval_opt.get("bar_plots", False):
+            if enabled_opts["bar_plots"]:
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
+
+    # Merge individual PDFs into combined documents for easier browsing
+    if plot_cfg["image_format"] == "pdf":
+        enabled_subdirs = [
+            subdir
+            for opt, subdirs in plot_option_subdirs.items()
+            if enabled_opts[opt]
+            for subdir in subdirs
+        ]
+        merge_pdf_subdirectories(output_basedir, run_ids=list(runs.keys()), subdirs=enabled_subdirs)
