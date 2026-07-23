@@ -1,0 +1,27 @@
+training_config:
+
+  num_mini_epochs: 16
+
+  learning_rate_scheduling:
+    lr_max: 7.1e-6 
+
+  losses:
+    structure:
+      type: LossStructureFunction
+      weight: 0.05
+      target_and_aux_calc: Physical
+      loss_fcts:
+        struct:
+          target_stream: CERRA
+          channels: ['10si', '2r', 'r_850', 't_850']
+          num_pairs: 262144
+          bin_edges_km: [10, 25, 50, 100, 200]
+          increment_power: 2.0
+          reduce: mean
+
+
+wgtags:
+  org: null
+  issue: null
+  exp: "multihp_f5_sharpness_ft"
+  grid: null

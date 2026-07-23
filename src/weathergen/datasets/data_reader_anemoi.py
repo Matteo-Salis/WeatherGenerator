@@ -84,6 +84,12 @@ class DataReaderAnemoi(DataReaderTimestep):
         if "frequency" in stream_info:
             frequency = timedelta_to_str(stream_info["frequency"])
             kwargs["frequency"] = frequency
+        for key in ("area", "trim_edge", "thinning"):
+            if key in stream_info:
+                value = stream_info[key]
+                if OmegaConf.is_config(value):
+                    value = OmegaConf.to_container(value, resolve=True)
+                kwargs[key] = value
         if "subsampling_rate" in stream_info:
             name = stream_info["name"]
             _logger.warning(

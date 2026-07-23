@@ -1,0 +1,24 @@
+stages:
+  - name: sharpnessft
+    stage: train
+    config_files:
+      - config/config_forecasting_era5_cerra_sharpness_ft.yml
+    from_run_id: f0gsfpui
+    mini_epoch: 64
+    options:
+      - general.istep=0
+      - data_loading.num_workers=6
+    chain_jobs: 2
+    nodes: 2
+    slurm_args:
+      - "--time=23:59:00"
+
+  - name: inf
+    stage: inference
+    from_run_id : STAGE.sharpnessft
+    config_files:
+      - config/config_forecasting_era5_cerra_inf.yml
+    chain_jobs: 1
+    nodes: 1
+    slurm_args:
+      - "--time=23:59:00" 
