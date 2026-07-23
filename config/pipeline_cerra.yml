@@ -1,0 +1,13 @@
+stages:
+  - name: pretrain
+    stage: train
+    config_files:
+      - config/config_forecasting_cerra_3.yml
+    options:
+      - training_config.num_mini_epochs=64
+      - data_loading.num_workers=8
+    chain_jobs: 5
+    nodes: 2
+    slurm_args:
+      - "--time=23:59:00"
+      

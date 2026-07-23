@@ -66,7 +66,7 @@ forecast_att_dense_rate: 1.0
 
 fe_healpix_level: 8
 fe_healpix_active_region:
-  name: europe
+  name: cerra
   rings: 1
 
 encoder_fusion_mode: sum # "sum", "concat_mlp", "perceiver"
@@ -77,6 +77,10 @@ rope_2D: False
 
 with_mixed_precision: True
 with_flash_attention: True
+# sequences (cells) per varlen attention launch: CUDA caps this at 65535, and the decoder's
+# per-cell transients scale with it. Tokens per embedder call bounds retained activations.
+flash_varlen_max_seqs: 8192
+embed_chunk_size: 4096
 compile_model: False
 with_fsdp: True
 attention_dtype: bf16
