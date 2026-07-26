@@ -25,6 +25,7 @@ NAMED_REGIONS: dict[str, tuple[float, float, float, float]] = {
     "uwc-west": (39.0, 63.0, -26.0, 41.0),
     "arome": (37.0, 56.0, -12.0, 16.0),
     "icon": (42.0, 51.0, -1.0, 18.0),
+    "ch": (45.5, 48.0, 5.5, 11.0),
 }
 
 

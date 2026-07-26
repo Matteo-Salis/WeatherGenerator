@@ -291,23 +291,73 @@ class EncoderModule(torch.nn.Module):
         self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
             torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
         )
-        self.pe_global.data[..., 0::2] += (
-            torch.sin(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
-            )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
-        )
         self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
             torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
         )
-        self.pe_global.data[..., 1::2] += (
-            torch.cos(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+        if cf.get("ae_global_pe_geographic", False):
+            # Cell centres in the codebase convention. r3tos2 returns azimuth wrapped to
+            # (-pi, pi] via atan2; remainder() unwraps it to [0, 2pi) so a domain that
+            # straddles the wrap stays continuous. Recomputed here (not reused from the RoPE
+            # block above) because pe_global is initialised unconditionally while that block
+            # only runs when rope_mode != "none".
+            pe_verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            pe_verts = pe_verts[self.grid.active_to_global_tensor(pe_verts.device)]
+            pe_coords = r3tos2(pe_verts.to(self.pe_global.device)).to(torch.float32)
+            pe_lat = pe_coords[:, 0]
+            pe_lon = torch.remainder(pe_coords[:, 1], 2 * torch.pi)
+
+            # GLOBAL normalisation to [0, 1]: portable across domains, so a checkpoint's PE
+            # means the same thing for a regional and a global run. lat in [-pi/2, pi/2],
+            # lon in [0, 2pi).
+            u_lat = (pe_lat + torch.pi / 2) / torch.pi
+            u_lon = pe_lon / (2 * torch.pi)
+
+            # Geometric frequency ladder from 1 cycle per globe up to ~4 cycles per HEALPix
+            # cell, so the finest scale resolves individual cells while the coarsest is
+            # smooth over the sphere. dim_embed is split 4 ways: sin/cos x lat/lon.
+            n_freq = dim_embed // 4
+            cell_frac = (58.6 / (2**self.healpix_level)) / 360.0
+            max_freq = 4.0 / cell_frac
+            freqs = torch.exp(
+                torch.linspace(
+                    0.0, float(np.log(max_freq)), n_freq, device=self.pe_global.device
+                )
             )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
-        )
+
+            ang_lat = 2 * torch.pi * torch.outer(u_lat, freqs)
+            ang_lon = 2 * torch.pi * torch.outer(u_lon, freqs)
+            pe_geo = torch.cat(
+                [torch.sin(ang_lat), torch.cos(ang_lat), torch.sin(ang_lon), torch.cos(ang_lon)],
+                dim=-1,
+            )  # (num_healpix_cells, 4 * n_freq)
+
+            assert pe_geo.shape[-1] == dim_embed, (
+                f"geographic pe_global width {pe_geo.shape[-1]} != dim_embed {dim_embed}; "
+                "ae_global_dim_embed must be divisible by 4."
+            )
+
+            self.pe_global.data += (
+                pe_geo.to(self.pe_global.dtype).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 1))
+            )
+        else:
+            self.pe_global.data[..., 0::2] += (
+                torch.sin(
+                    torch.outer(
+                        torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs
+                    )
+                )
+                .unsqueeze(1)
+                .repeat((1, cf.ae_local_num_queries, 1))
+            )
+            self.pe_global.data[..., 1::2] += (
+                torch.cos(
+                    torch.outer(
+                        torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs
+                    )
+                )
+                .unsqueeze(1)
+                .repeat((1, cf.ae_local_num_queries, 1))
+            )
 
         self.q_cells_lens.data.fill_(1)
         self.q_cells_lens.data[0] = 0
