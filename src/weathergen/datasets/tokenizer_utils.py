@@ -96,34 +96,30 @@ def encode_times_target(times, time_win) -> torch.tensor:
 
 
 def hpy_cell_splits(coords: torch.tensor, hl: int):
-    """Compute healpix cell id for each coordinate on given level hl
+    """Group the data points by the healpix cell they fall into on given level hl
 
     Returns
-      hpy_idxs_ord_split : list of per cell indices into thetas,phis,posr3
+      occupied : sorted ids of the cells holding at least one point
+      cell_idxs : for each cell in occupied, the indices of its points into thetas
       thetas : thetas in rad
-      phis : phis in rad
     """
     thetas, phis = theta_phi_to_standard_coords(coords)
     # healpix cells for all points
     hpy_idxs = ang2pix(2**hl, thetas, phis, nest=True)
+    if len(hpy_idxs) == 0:
+        return np.empty(0, dtype=np.int64), [], thetas
 
-    # extract information to split according to cells by first sorting and then finding split idxs
+    # sort by cell, then cut the sorted indices where the cell id changes
     hpy_idxs_ord = np.argsort(hpy_idxs, **numpy_argsort_args)
-    splits = np.flatnonzero(np.diff(hpy_idxs[hpy_idxs_ord]))
+    cells = hpy_idxs[hpy_idxs_ord]
+    cuts = np.flatnonzero(np.diff(cells)) + 1
 
-    # extract per cell data
-    hpy_idxs_ord_temp = np.split(hpy_idxs_ord, splits + 1)
-    hpy_idxs_ord_split = [np.array([], dtype=np.int64) for _ in range(12 * 4**hl)]
-    # TODO: split smarter (with a augmented splits list?) so that this loop is not needed
-    for b, x in zip(np.unique(np.unique(hpy_idxs[hpy_idxs_ord])), hpy_idxs_ord_temp, strict=True):
-        hpy_idxs_ord_split[b] = x
-
-    return (hpy_idxs_ord_split, thetas, phis)
+    return cells[np.concatenate(([0], cuts))], np.split(hpy_idxs_ord, cuts), thetas
 
 
 def hpy_splits(
     coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool, offset_step: int = 0
-) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
+) -> tuple[list[list[torch.Tensor]], list[list[int]]]:
     """Compute healpix cell for each data point and splitting information per cell;
        when the token_size is exceeded then splitting based on lat is used;
        tokens can be padded
@@ -134,41 +130,23 @@ def hpy_splits(
         (so that data[idxs_ord].split( idxs_ord_lens) provides per cell data)
     """
 
-    # list of data points per healpix cell
-    (hpy_idxs_ord_split, thetas, phis) = hpy_cell_splits(coords, hl)
+    occupied, cell_idxs, thetas = hpy_cell_splits(coords, hl)
 
-    # if token_size is exceeed split based on latitude
-    # TODO: split by hierarchically traversing healpix scheme
-    thetas_sorted = [torch.argsort(thetas[idxs], stable=True) for idxs in hpy_idxs_ord_split]
-    # remainder for padding to token size
-    if pad_tokens:
-        rem = [
-            token_size - (len(idxs) % token_size if len(idxs) % token_size != 0 else token_size)
-            for idxs in hpy_idxs_ord_split
-        ]
-    else:
-        rem = np.zeros(len(hpy_idxs_ord_split), dtype=np.int32)
-
-    # helper variables to split according to cells
     # pad to token size *and* offset by +1 to account for the index 0 that is added for the padding
     offset = (1 if pad_tokens else 0) + offset_step
-    int32 = torch.int32
-    idxs_ord = [
-        list(
-            torch.split(
-                torch.cat(
-                    (torch.from_numpy(np.take(idxs, ts) + offset), torch.zeros(r, dtype=int32))
-                ),
-                token_size,
-            )
-        )
-        if len(idxs) > 0
-        else []
-        for idxs, ts, r in zip(hpy_idxs_ord_split, thetas_sorted, rem, strict=True)
-    ]
 
-    # extract length and flatten nested list
-    idxs_ord_lens = [[len(a) for a in aa] for aa in idxs_ord]
+    idxs_ord = [[] for _ in range(12 * 4**hl)]
+    idxs_ord_lens = [[] for _ in range(12 * 4**hl)]
+    for cell, idxs in zip(occupied, cell_idxs, strict=True):
+        # if token_size is exceeded split based on latitude
+        # TODO: split by hierarchically traversing healpix scheme
+        by_lat = np.take(idxs, torch.argsort(thetas[idxs], stable=True))
+        # pad the cell's last token up to token_size
+        rem = -len(idxs) % token_size if pad_tokens else 0
+        tokens = torch.cat((torch.from_numpy(by_lat + offset), torch.zeros(rem, dtype=torch.int32)))
+
+        idxs_ord[cell] = list(torch.split(tokens, token_size))
+        idxs_ord_lens[cell] = [len(t) for t in idxs_ord[cell]]
 
     return idxs_ord, idxs_ord_lens
 
@@ -198,13 +176,19 @@ def tokenize_spacetime(
     separately
     """
 
+    t_unique = np.unique(rdata.datetimes)
+    if len(t_unique) == 1:
+        return tokenize_space(rdata, token_size, hl, pad_tokens)
+
     num_healpix_cells = 12 * 4**hl
     idxs_cells = [[] for _ in range(num_healpix_cells)]
     idxs_cells_lens = [[] for _ in range(num_healpix_cells)]
 
+    # only cells holding data in some time step can receive tokens below
+    occupied = np.unique(ang2pix(2**hl, *theta_phi_to_standard_coords(rdata.coords), nest=True))
+
     offset_step = 0
-    t_unique = np.unique(rdata.datetimes)
-    for _, t in enumerate(t_unique):
+    for t in t_unique:
         # data for current time step
         mask = t == rdata.datetimes
         rdata_cur = IOReaderData(
@@ -213,8 +197,9 @@ def tokenize_spacetime(
         idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens, offset_step)
 
         # collect data for all time steps
-        idxs_cells = [t + tc for t, tc in zip(idxs_cells, idxs_cur, strict=True)]
-        idxs_cells_lens = [t + tc_l for t, tc_l in zip(idxs_cells_lens, idxs_cur_lens, strict=True)]
+        for cell in occupied:
+            idxs_cells[cell] += idxs_cur[cell]
+            idxs_cells_lens[cell] += idxs_cur_lens[cell]
         offset_step += mask.sum()
 
     return idxs_cells, idxs_cells_lens

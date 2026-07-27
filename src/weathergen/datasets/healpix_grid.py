@@ -7,20 +7,24 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import pathlib
 import warnings
+from collections.abc import Sequence
 
+import anemoi.datasets as anemoi_datasets
 import astropy_healpix as hp
 import numpy as np
 import torch
 from numpy.typing import NDArray
 from omegaconf import OmegaConf
 
+from weathergen.datasets.data_reader_anemoi import _clip_lat, _clip_lon
 from weathergen.datasets.regions import get_region_box
+from weathergen.datasets.utils import coords_to_hpyidxs
 
 
 def geographic_cell_centers(level: int) -> tuple[NDArray, NDArray]:
-    """Cell-centre (lat_deg, lon_deg) in the tokenizer's coordinate convention.
-    """
+    """Cell-centre (lat_deg, lon_deg) in the tokenizer's coordinate convention."""
     num = 12 * 4**level
     lon, lat = hp.healpix_to_lonlat(np.arange(num), 2**level, order="nested")
     geo_lon = lon.deg - 180.0
@@ -45,43 +49,88 @@ def _buffer_by_rings(selected: NDArray, level: int, rings: int) -> NDArray:
     return np.sort(np.flatnonzero(in_buffer))
 
 
-def resolve_region_cells(level: int, region: dict) -> NDArray:
-    """
-    Native nested cell ids inside the configured geographic box, grown by a ``rings`` buffer
-    of neighbouring cells. The buffer is measured in cells, so a fixed ring count covers a
-    smaller geographic extent at finer HEALPix levels.
-    """
+def _box_cells(level: int, region: dict) -> NDArray:
+    """Cells whose centre lies inside the region's geographic box."""
     name = region.get("name")
     if name is not None:
         lat_rng, lon_rng = get_region_box(name)
     else:
-        lat_rng = region.get("lat")
-        lon_rng = region.get("lon")
+        lat_rng, lon_rng = region.get("lat"), region.get("lon")
     valid = lat_rng is not None and lon_rng is not None and len(lat_rng) == 2 and len(lon_rng) == 2
     assert valid, (
-        "healpix_active_region requires a known 'name' or explicit lat: [min, max] and "
-        "lon: [min, max]."
+        "healpix_active_region requires a known 'name', explicit lat: [min, max] and "
+        "lon: [min, max], or from_data: true."
     )
     lat_min, lat_max = float(lat_rng[0]), float(lat_rng[1])
     lon_min, lon_max = float(lon_rng[0]), float(lon_rng[1])
 
     lat, lon = geographic_cell_centers(level)
-
     if lon_min <= lon_max:
         lon_in = (lon >= lon_min) & (lon <= lon_max)
-    else:
+    else:  # box wraps the antimeridian
         lon_in = (lon >= lon_min) | (lon <= lon_max)
-    sel = lon_in & (lat >= lat_min) & (lat <= lat_max)
 
-    selected = np.flatnonzero(sel).astype(np.int64)
+    return np.flatnonzero(lon_in & (lat >= lat_min) & (lat <= lat_max)).astype(np.int64)
+
+
+def _coverage_cells(level: int, stream_info: dict, data_paths: Sequence) -> NDArray:
+    """Cells holding at least one data point of the stream 
+    For projected grids this avoids the empty cells a lat/lon bounding box inevitably includes.
+    """
+    assert stream_info.get("type") == "anemoi", (
+        "healpix_active_region 'from_data' is only supported for anemoi streams; stream "
+        f"'{stream_info.get('name')}' has type '{stream_info.get('type')}'."
+    )
+    filenames = stream_info.get("filenames", [])
+    assert filenames, "healpix_active_region 'from_data' requires the stream to set 'filenames'"
+
+    crop = {k: stream_info[k] for k in ("area", "trim_edge", "thinning") if k in stream_info}
+    crop = {
+        k: OmegaConf.to_container(v, resolve=True) if OmegaConf.is_config(v) else v
+        for k, v in crop.items()
+    }
+
+    cells = []
+    for filename in filenames:
+        # streams name their datasets, so look them up under data_paths as the sampler does
+        candidates = [pathlib.Path(filename), *(pathlib.Path(p) / filename for p in data_paths)]
+        path = next((p for p in candidates if p.exists()), None)
+        assert path is not None, f"healpix_active_region 'from_data': not found: {candidates}"
+
+        ds = anemoi_datasets.open_dataset(str(path), **crop)
+        # clip exactly as the reader does, so cells match the tokenizer's point assignment
+        lats = _clip_lat(ds.latitudes).astype(np.float64)
+        lons = _clip_lon(ds.longitudes).astype(np.float64)
+        cells.append(coords_to_hpyidxs(level, lats, lons))
+
+    return np.unique(np.concatenate(cells)).astype(np.int64)
+
+
+def resolve_region_cells(
+    level: int, region: dict, stream_info: dict | None = None, data_paths: Sequence = ()
+) -> NDArray:
+    """Native nested cell ids of a region, grown by a ``rings`` buffer of neighbouring cells.
+
+    The region is either a geographic box (``name``, or explicit ``lat``/``lon``) or, with
+    ``from_data: true``, the exact footprint of the stream's dataset. The buffer is measured
+    in cells, so a fixed ring count covers a smaller geographic extent at finer levels.
+    """
+    if region.get("from_data", False):
+        assert stream_info is not None, (
+            "healpix_active_region 'from_data' needs the stream's info to resolve; use it in a "
+            "stream config, or 'from_stream: <STREAM>' for fe_healpix_active_region."
+        )
+        selected = _coverage_cells(level, stream_info, data_paths)
+    else:
+        selected = _box_cells(level, region)
+
     assert selected.size > 0, "healpix_active_region selected no healpix cells"
 
     return _buffer_by_rings(selected, level, int(region.get("rings", 0)))
 
 
-def _resolve_region(stream_info):
-    """Encoder region for one stream: its own ``healpix_active_region``, else GLOBAL.
-    """
+def _stream_region(stream_info) -> dict | None:
+    """Region spec of one stream: its own ``healpix_active_region``, else None (global)."""
     region = stream_info.get("healpix_active_region", None)
     if OmegaConf.is_config(region):
         region = OmegaConf.to_container(region, resolve=True)
@@ -92,39 +141,70 @@ def region_for_level(cf, level: int):
     """Active region for the encoder operating at HEALPix ``level``.
     """
     default_level = int(cf.healpix_level)
-    regions = [
-        _resolve_region(si)
-        for si in cf.streams.values()
-        if int(si.get("healpix_level", default_level)) == level
+    streams = [
+        si for si in cf.streams.values() if int(si.get("healpix_level", default_level)) == level
     ]
-    if not regions:
+    regions = [_stream_region(si) for si in streams]
+
+    # no stream at this level, or at least one of them covers the globe
+    if not regions or any(not r for r in regions):
         return None
-    # global region (None)
-    if any(not r for r in regions):
-        return None
-    # single shared region 
+
+    # one shared box spec: pass it on unresolved, so it also reads well in the startup log
     first = regions[0]
-    if all(r == first for r in regions):
+    if not first.get("from_data", False) and all(r == first for r in regions):
         return first
-    # differing regions at the same level => union of their resolved cell ids
-    return np.concatenate([resolve_region_cells(level, r) for r in regions])
+
+    data_paths = list(cf.get("data_paths", []))
+    resolved = [
+        resolve_region_cells(level, r, si, data_paths)
+        for si, r in zip(streams, regions, strict=True)
+    ]
+    return np.unique(np.concatenate(resolved))
 
 
 def forecast_level(cf) -> int:
-    """Level of the forecast/decode grid (grid_F)
-    """
+    """Level of the forecast/decode grid (grid_F)"""
     level = cf.get("fe_healpix_level", None)
     assert level is not None, "config must set 'fe_healpix_level' (the forecast/decode grid level)"
     return int(level)
 
 
 def forecast_region(cf):
-    """Active region for the forecast/decode grid (grid_F)
+    """Active region for the forecast/decode grid (grid_F).
+
+    Supports ``from_stream: <STREAM>`` to use the exact data footprint of the named stream,
+    plus an optional ``rings`` buffer, as the forecast grid.
     """
     region = cf.get("fe_healpix_active_region", cf.get("healpix_active_region", None))
     if OmegaConf.is_config(region):
         region = OmegaConf.to_container(region, resolve=True)
-    return region
+
+    name = region.get("from_stream") if isinstance(region, dict) else None
+    if name is None:
+        return region
+
+    assert name in cf.streams, (
+        f"fe_healpix_active_region from_stream '{name}' is not a configured stream: "
+        f"{list(cf.streams.keys())}"
+    )
+    return resolve_region_cells(
+        forecast_level(cf),
+        {"from_data": True, "rings": region.get("rings", 0)},
+        cf.streams[name],
+        list(cf.get("data_paths", [])),
+    )
+
+
+def region_label(region) -> str:
+    """Compact description of a region spec, for logging."""
+    if OmegaConf.is_config(region):
+        region = OmegaConf.to_container(region, resolve=True)
+    if region is None or len(region) == 0:
+        return "global"
+    if isinstance(region, dict):
+        return str(region)
+    return f"{len(region)} explicit cells"
 
 
 class NativeGrid:
@@ -153,12 +233,12 @@ class NativeGrid:
         if OmegaConf.is_config(region):
             region = OmegaConf.to_container(region, resolve=True)
 
-        if isinstance(region, np.ndarray):
-            self.active_to_global = np.unique(region.astype(np.int64))
-        elif not region:
+        if region is None or len(region) == 0:
             self.active_to_global = np.arange(self.num_global, dtype=np.int64)
-        else:
+        elif isinstance(region, dict):
             self.active_to_global = resolve_region_cells(self.level, region)
+        else:  # explicit cell ids, e.g. a data-driven or unioned region
+            self.active_to_global = np.unique(np.asarray(region, dtype=np.int64))
 
         self.num_cells = int(self.active_to_global.shape[0])
         self.is_full = self.num_cells == self.num_global

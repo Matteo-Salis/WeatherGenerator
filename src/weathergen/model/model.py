@@ -25,6 +25,7 @@ from weathergen.datasets.healpix_grid import (
     forecast_level,
     forecast_region,
     region_for_level,
+    region_label,
 )
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
@@ -260,7 +261,7 @@ class Model(torch.nn.Module):
             self.encoders[str(L)] = enc
             self.regridders[str(L)] = LatentRegridder(enc.grid, self.grid, reduce_op=reduce_op)
             if is_root():
-                region = "global" if enc.grid.is_full else region_for_level(cf, L)
+                region = "global" if enc.grid.is_full else region_label(region_for_level(cf, L))
                 logger.info(
                     f"encoder L={L}: {enc.num_healpix_cells}/{enc.grid.num_global} active cells"
                     f" ({region}), streams {list(streams_L.keys())},"
@@ -270,7 +271,7 @@ class Model(torch.nn.Module):
         F = forecast_level(cf)
         self.fusion_level_F = F
         if is_root():
-            region = "global" if self.grid.is_full else forecast_region(cf)
+            region = "global" if self.grid.is_full else region_label(forecast_region(cf))
             logger.info(
                 f"grid_F L={F}: {self.grid.num_cells}/{self.grid.num_global} active cells"
                 f" ({region})"
