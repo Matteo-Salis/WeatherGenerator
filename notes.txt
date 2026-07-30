@@ -1,0 +1,3 @@
+CERRA 3h with 3h time_step better model. 
+also artifacts seem to be less present
+it also shows a faster training

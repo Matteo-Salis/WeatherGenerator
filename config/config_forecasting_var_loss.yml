@@ -72,7 +72,7 @@ healpix_level: 5
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: False           # FSDP2 sharding bug with ae_local_blocks; use DDP
+with_fsdp: True           # FSDP2 sharding bug with ae_local_blocks; use DDP
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -213,5 +213,5 @@ validation_config:
 wgtags:
   org: null
   issue: null
-  exp: cerra_sharpness_ablation
+  exp: null
   grid: null
