@@ -14,8 +14,8 @@ CERRA :
     trim_edge: 100 #755161 for 100, 470k points left for 200
   stream_id : 0
   frequency : 3h
-  source : [ '2t', 'msl', 'r_850', 't_850', 'u_850', 'v_850', 'z_850']
-  target : [ '2t', 'msl', 'r_850', 't_850', 'u_850', 'v_850', 'z_850']
+  source : [ '2t', 'msl', '10si', '10wdir', 'r_850', 't_850', 'u_850', 'v_850', 'z_850']
+  target : [ '2t', 'msl', '10si', '10wdir', 'r_850', 't_850', 'u_850', 'v_850', 'z_850']
   geoinfo_channels : [ 'insolation',
                        'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day',
                       #  'cos_latitude', 'cos_longitude',
