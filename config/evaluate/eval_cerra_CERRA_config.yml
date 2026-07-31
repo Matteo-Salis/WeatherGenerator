@@ -43,7 +43,8 @@ run_ids :
   #       label: "ABS Coord Hack 3h CERRA - 6h time_step"
   #       rank: "all"
   #       color: "tab:blue"
-  k8kq6sw1: 
+  #k8kq6sw1
+  ssc50lcg: 
       label : "ABS Coord Hack 3h CERRA - 3h time_step"
       rank: "all"
       color: "tab:orange"

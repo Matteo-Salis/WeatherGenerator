@@ -14,7 +14,6 @@ CERRA :
     trim_edge: 100 #755161 for 100, 470k points left for 200
   stream_id : 0
   frequency : 3h
-  #filenames : ['cerra-rr-an-oper-se-al-ec-mars-5p5km-1985-2023-3h-v2.zarr']
   source : [ '2t', 'msl', 'r_850', 't_850', 'u_850', 'v_850', 'z_850']
   target : [ '2t', 'msl', 'r_850', 't_850', 'u_850', 'v_850', 'z_850']
   geoinfo_channels : [ 'insolation',
