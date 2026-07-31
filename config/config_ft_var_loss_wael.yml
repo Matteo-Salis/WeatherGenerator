@@ -7,8 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-general:
-
 training_config:
   num_mini_epochs: 80          # 64 done in vbm9r3om -> ~16 fine-tune epochs
   learning_rate_scheduling:
