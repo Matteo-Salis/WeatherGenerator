@@ -1,0 +1,73 @@
+global_plotting_options:
+ regions: ["cerra"]
+ image_format : "png" 
+ dpi_val : 300
+ fps: 2
+
+evaluation:
+  metrics  : ["rmse","bias","mae"]
+  #etrics  : 
+  #- psd:
+  #      psd_method: "sht"  
+  regions: ["cerra"]
+  summary_plots : true
+  ratio_plots : true
+  heat_maps : false
+  summary_dir: "./plots/MF/CERRA_experiments/"
+  plot_ensemble: false #supported: false, "std", "minmax", "members"
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  print_summary: false #print out score values on screen. it can be verbose
+  log_scale: false
+  add_grid: false
+  score_cards: false
+  bar_plots: true
+  num_processes: "auto"  #options: int, "auto", 0 means no parallelism (default)
+  
+default_streams:
+  CERRA:
+    channels: ["2t", "2r", "r_1000", "10si", "10wdir", "r_850", "t_850", "u_850", "v_850", "z_500", "msl"] #, "blah"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+    plotting:
+      sample: "all" #,1,2,3,4,5,6,7]
+      forecast_step: "all" 
+      ensemble: "mean"
+      plot_maps: true
+      plot_bias: true
+      plot_target: true
+      plot_histograms: true
+      plot_animations: true
+      
+run_ids :
+  # z51alqvt:
+  #   #type: "json"
+  #   label: "CERRA --> CERRA - 3h - healpix 5 - tokensize 256 - 64 epochs"
+  #   rank: "all"
+  #   color: "tab:green"
+  # l978hwrg:
+  #   #type: "json"
+  #   label: "CERRA --> CERRA - 3h - healpix 5 - tokensize 16 - 64 epochs"
+  #   rank: "all"
+  #   color: "tab:green"
+  # zs45zogd:
+  #   #type: "json"
+  #   label: "CERRA --> CERRA - 3h - healpix 5 - tokensize 16 - 128 epochs"
+  #   rank: "all"
+  #   color: "tab:green"
+  # u4lru8ru:
+  #   #type: "json"
+  #   label: "CERRA --> CERRA - 3h - healpix 6 - tokensize 16 - 64 epochs"
+  #   rank: "all"
+  #   color: "tab:green"
+  wi43azkh:
+    #type: "json"
+    label: "CERRA --> CERRA - 3h - healpix 6 - tokensize 16 - 118 epochs"
+    rank: "all"
+    color: "tab:green"
+  # jpy5gmxb:
+  #  #type: "json"
+  #  label: "CERRA --> CERRA - 3h - healpix 6 - tokensize 16 - 46 epochs"
+  #  rank: "all"
+  #  color: "tab:green"

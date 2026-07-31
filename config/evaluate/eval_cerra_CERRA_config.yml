@@ -1,0 +1,57 @@
+
+global_plotting_options:
+ regions: ["cerra"]
+ image_format : "png" 
+ dpi_val : 500
+ fps: 2
+
+evaluation:
+  metrics  : ["rmse","bias","mae"]
+  regions: ["cerra"]
+  summary_plots : true
+  ratio_plots : true
+  heat_maps : false
+  summary_dir: "./plots/MF_KNMI/eval_plots/CERRA_experiments/abs_coords"
+  plot_ensemble: false #supported: false, "std", "minmax", "members"
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  print_summary: false #print out score values on screen. it can be verbose
+  log_scale: false
+  add_grid: false
+  score_cards: false
+  bar_plots: true
+  num_processes: "auto"  #options: int, "auto", 0 means no parallelism (default)
+  
+default_streams:
+  CERRA:
+    channels: ["2t", "msl", "r_850", "t_850", "u_850", "v_850", "z_850"] #, "blah"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+    plotting:
+      sample: [1,2,3]
+      forecast_step: "all"
+      ensemble: "mean"
+      plot_maps: true
+      plot_bias: true
+      plot_target: true
+      plot_histograms: true
+      plot_animations: true
+      
+run_ids :
+  # idpbnzqn: 
+  #       label: "ABS Coord Hack 3h CERRA - 6h time_step"
+  #       rank: "all"
+  #       color: "tab:blue"
+  k8kq6sw1: 
+      label : "ABS Coord Hack 3h CERRA - 3h time_step"
+      rank: "all"
+      color: "tab:orange"
+  # uxza5406:
+  #     label: "ABS Coord Config 3h CERRA - 6h time_step"
+  #     rank: "all"
+  #     color: "tab:green"
+  # zgymiiqy:
+  #     label: "ABS Coord Hack 3h CERRA - 6h time_step - ema 1e-3"
+  #     rank: "all"
+  #     color: "tab:red"

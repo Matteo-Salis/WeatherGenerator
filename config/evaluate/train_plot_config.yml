@@ -1,0 +1,14 @@
+train:
+  plot:
+    zz0n17p5: 
+        slurm_id : 0
+        description: "ABS Coord Hack 3h CERRA - 6h time_step"
+    h0hcwbum: 
+        slurm_id : 0
+        description : "ABS Coord Hack 3h CERRA - 3h time_step"
+    sny1qhya:
+        slurm_id : 0
+        description: "ABS Coord Config 3h CERRA - 6h time_step"
+    r1y604t1:
+        slurm_id : 0
+        description: "ABS Coord Hack 3h CERRA - 6h time_step - ema 1e-3"

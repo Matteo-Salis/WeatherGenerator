@@ -1,0 +1,44 @@
+# (C) Copyright 2024 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+CERRA :
+  type : anemoi
+  anemoi_config:
+    dataset: 'cerra-rr-an-oper-se-al-ec-mars-5p5km-1985-2023-3h-v2'
+    trim_edge: 100 #755161 for 100, 470k points left for 200
+  stream_id : 0
+  frequency : 3h
+  #filenames : ['cerra-rr-an-oper-se-al-ec-mars-5p5km-1985-2023-3h-v2.zarr']
+  source : [ '2t', 'msl', 'r_850', 't_850', 'u_850', 'v_850', 'z_850']
+  target : [ '2t', 'msl', 'r_850', 't_850', 'u_850', 'v_850', 'z_850']
+  geoinfo_channels : [ 'insolation',
+                       'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day',
+                      #  'cos_latitude', 'cos_longitude',
+                      #  'sin_latitude', 'sin_longitude',
+                       ]
+  loss_weight : 1.
+  token_size : 32
+  max_num_targets: 375000 #131072 #131072 # 262144   #131072 # 65536 #32768 #8192
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 512
+    num_blocks : 2
+  # pred_spatial_shared: ERA5
+  embed_target_coords :
+    net : linear
+    dim_embed : 512
+  target_readout :
+    type : 'obs_value'
+    num_layers : 2
+    num_heads : 4
+  pred_head :
+    ens_size : 1
+    num_layers : 1
