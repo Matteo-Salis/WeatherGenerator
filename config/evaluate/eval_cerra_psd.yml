@@ -39,8 +39,8 @@ run_ids :
     rank: "all"
     # color: "tab:yellow"
 
-  # sx10gr67 :
-  #   #type: "json"
-  #   label: "CERRA-str-loss-ft-Wael"
-  #   rank: "all"
-  #   # color: "tab:yellow"
+  sx10gr67 :
+    #type: "json"
+    label: "CERRA-str-loss-ft-Wael"
+    rank: "all"
+    # color: "tab:yellow"
