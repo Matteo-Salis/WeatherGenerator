@@ -1,4 +1,3 @@
-
 global_plotting_options:
  regions: ["cerra"]
  image_format : "png" 
@@ -6,21 +5,16 @@ global_plotting_options:
  fps: 2
 
 evaluation:
-  metrics  : ["rmse","bias","mae"]
   regions: ["cerra"]
+  metrics  : 
+    - psd:
+        psd_method: "fft"                    # "sht" (SHT-based) or "fft" (regrid FFT)
+        psd_regrid_resolution: 0.25           # degrees, only for fft method
+        # grid_type: "octahedral"              # "octahedral" (default), "regular", "reduced".
   summary_plots : true
   ratio_plots : true
-  heat_maps : false
   summary_dir: "./plots/MF_KNMI/eval_plots/CERRA_experiments/structure_loss"
-  plot_ensemble: false #supported: false, "std", "minmax", "members"
-  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
-  print_summary: false #print out score values on screen. it can be verbose
-  log_scale: false
-  add_grid: false
-  score_cards: false
-  bar_plots: true
-  num_processes: "auto"  #options: int, "auto", 0 means no parallelism (default)
-  
+
 default_streams:
   CERRA:
     channels: ['10si', '10wdir', 'tp', '2t'] #, "blah"]
@@ -29,15 +23,15 @@ default_streams:
       sample: "all"
       ensemble: "all"
     plotting:
-      sample: [0,15,40]
-      forecast_step: "all"
+      sample: [0,1,2,3] #,1,2,3,4,5,6,7]
+      forecast_step: "all" 
       ensemble: "mean"
       plot_maps: true
       plot_bias: true
       plot_target: true
       plot_histograms: true
       plot_animations: true
-      
+
 run_ids :
   h9mgn1l0 :
     #type: "json"
@@ -45,9 +39,8 @@ run_ids :
     rank: "all"
     # color: "tab:yellow"
 
-  sx10gr67 :
-    #type: "json"
-    label: "CERRA-str-loss-ft-Wael"
-    rank: "all"
-    # color: "tab:yellow"
-
+  # sx10gr67 :
+  #   #type: "json"
+  #   label: "CERRA-str-loss-ft-Wael"
+  #   rank: "all"
+  #   # color: "tab:yellow"

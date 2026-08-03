@@ -1,3 +1,6 @@
-CERRA 3h with 3h time_step better model. 
-also artifacts seem to be less present
-it also shows a faster training
+Pretraining - ERA5 CERRA:
+/e/scratch/weatherai/slurm/slurm_weathergen_mapjar87_dir/WeatherGenerator/src/weathergen/train/trainer.py:820: RuntimeWarning: Mean of empty slice
+0:   + f"{self.cf.general.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
+
+to plot structure loss:
+plot_train --channels loss --streams CERRA --metrics structure
