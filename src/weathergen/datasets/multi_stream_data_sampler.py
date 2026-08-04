@@ -80,6 +80,7 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
         )
         rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
+        logger.info(f"***** Sample --- Type: {type} --- Idx: {idx} ---Shuffle: {shuffle} --- Date: {np.unique(rdata.datetimes)}*****")
         rdatas += [rdata]
 
     return IOReaderData.combine(rdatas)
@@ -595,6 +596,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
             if rdata.is_empty():
+                
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(step_forecast_dt)
@@ -607,6 +609,19 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 rdata.is_spoof = True
 
             output_data += [rdata]
+            
+        logger.info(f"***** Input-Output Data Info: ")
+        logger.info(f"      -Input Data len: {len(input_data)}")
+        logger.info(f"      -Output Dat len: {len(output_data)}")
+        logger.info(f"      -Input Coords shape: {input_data[0].coords.shape}")
+        logger.info(f"      -Output Coords shape: {output_data[0].coords.shape}")
+        logger.info(f"      -Input Data shape: {input_data[0].data.shape}")
+        logger.info(f"      -Output Data shape: {output_data[0].data.shape}")
+            
+        check_spatial_points_O = np.array_equal(output_data[0].coords,
+                                        output_data[1].coords,
+                                        equal_nan=True)
+        logger.info(f"      -Output coords consistency check: {check_spatial_points_O}")
 
         return (input_data, output_data)
 
