@@ -13,6 +13,7 @@ import logging
 import math
 import typing
 import warnings
+import matplotlib.pyplot as plt
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
@@ -239,7 +240,39 @@ class ModelParams(torch.nn.Module):
             .unsqueeze(1)
             .repeat((1, cf.ae_local_num_queries, 1))
         )
+        
+        print("**** GLOBAL PE: ",  self.pe_global.data[..., 0::2].shape)
+        print("**** PE values: ", self.pe_global.data[..., 0::2])
+        # Convert the tensor to a NumPy array
+        data_np = self.pe_global.data[..., 0::2].squeeze().to(torch.float32).numpy()
+        print("**** data_np: ", data_np)
+        # Plot the 2D tensor as an image or heatmap
+        plt.figure(figsize=(5, 5))
+        plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+        #plt.colorbar()  # Add a colorbar to show the scale
+        plt.title("GLOBAL PE sin")
+        plt.tight_layout()
+        plt.savefig("/users/msalis/project/weather_generator/export/test/Global_PE_sin.jpg")
 
+        data_np = self.pe_global.data[..., 1::2].squeeze().to(torch.float32).numpy()
+        # Plot the 2D tensor as an image or heatmap
+        plt.figure(figsize=(5, 5))
+        plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+        #plt.colorbar()  # Add a colorbar to show the scale
+        plt.title("GLOBAL PE cos")
+        plt.tight_layout()
+        plt.savefig("/users/msalis/project/weather_generator/export/test/Global_PE_cos.jpg")
+
+        # Convert the tensor to a NumPy array
+        data_np = self.pe_embed.data[..., 0::2].squeeze().to(torch.float32).numpy()
+        # Plot the 2D tensor as an image or heatmap
+        plt.figure(figsize=(5, 5))
+        plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+        #plt.colorbar()  # Add a colorbar to show the scale
+        plt.title("LOCAL PE sin")
+        plt.tight_layout()
+        plt.savefig("/users/msalis/project/weather_generator/export/test/Local_PE_sin.jpg")
+        
         # healpix neighborhood structure
 
         hlc = self.healpix_level
