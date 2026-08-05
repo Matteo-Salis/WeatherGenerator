@@ -21,10 +21,10 @@ default_streams:
     evaluation:
       forecast_step: "all"
       sample: "all"
-      ensemble: "all"
+      ensemble: "mean"
     plotting:
-      sample: [0,1,2,3] #,1,2,3,4,5,6,7]
-      forecast_step: [1] 
+      sample: [0,15] #,1,2,3,4,5,6,7]
+      forecast_step: "all"
       ensemble: "mean"
       plot_maps: true
       plot_bias: true
@@ -33,13 +33,18 @@ default_streams:
       plot_animations: true
 
 run_ids :
-  h9mgn1l0 :
+
+  lca7rnty:
+    #type: "json"
+    label: "CERRA-baseline-Wael"
+    rank: "all"
+    # color: "tab:yellow"
+  oikse6ab:
     #type: "json"
     label: "CERRA-baseline"
     rank: "all"
     # color: "tab:yellow"
-
-  sx10gr67 :
+  nle7pvpz:
     #type: "json"
     label: "CERRA-str-loss-ft-Wael"
     rank: "all"

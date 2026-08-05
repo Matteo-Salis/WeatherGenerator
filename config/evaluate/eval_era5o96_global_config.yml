@@ -1,13 +1,13 @@
 
 global_plotting_options:
- regions: ["cerra"]
+ regions: ["global"]
  image_format : "png" 
  dpi_val : 500
  fps: 2
 
 evaluation:
   metrics  : ["rmse","bias","mae"]
-  regions: ["cerra"]
+  regions: ["global"]
   summary_plots : true
   ratio_plots : true
   heat_maps : false
@@ -22,8 +22,8 @@ evaluation:
   num_processes: "auto"  #options: int, "auto", 0 means no parallelism (default)
   
 default_streams:
-  CERRA:
-    channels: ['10si', '10wdir', 'tp', '2t'] #, "blah"]
+  ERA5:
+    channels: ['q_850'] #, "blah"]
     evaluation:
       forecast_step: "all"
       sample: "all"
