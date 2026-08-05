@@ -19,8 +19,8 @@ CERRA :
   target : [ '2t', 'msl', '10si', '10wdir', 'r_850', 't_850', 'u_850', 'v_850', 'z_850']
   geoinfo_channels : [ 'insolation',
                        'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day',
-                       'cos_latitude', 'cos_longitude',
-                       'sin_latitude', 'sin_longitude',
+                      #  'cos_latitude', 'cos_longitude',
+                      #  'sin_latitude', 'sin_longitude',
                        ]
   loss_weight : 1.
   token_size : 32
