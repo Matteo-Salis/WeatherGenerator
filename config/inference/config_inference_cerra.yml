@@ -6,8 +6,8 @@ test_config:
   output:
     num_samples: 50
   samples_per_mini_epoch: 50
-  forecast:
-    num_steps: 2
+  # forecast:
+  #   num_steps: 2
 # streams_directory: ./config/inference/streams/cerra_hpx6/
 streams:
   CERRA:
