@@ -247,8 +247,8 @@ class ModelParams(torch.nn.Module):
         data_np = self.pe_global.data[..., 0::2].squeeze().to(torch.float32).numpy()
         print("**** data_np: ", data_np)
         # Plot the 2D tensor as an image or heatmap
-        plt.figure(figsize=(5, 5))
-        plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+        plt.figure(figsize=(15, 15))
+        plt.imshow(data_np[1000:2500, :])  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
         #plt.colorbar()  # Add a colorbar to show the scale
         plt.title("GLOBAL PE sin")
         plt.tight_layout()
