@@ -37,7 +37,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 1
+ae_aggregation_num_blocks: 0
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -114,7 +114,7 @@ data_loading:
   num_workers: 12
   rng_seed: ???
   repeat_data_in_mini_epoch: False
-  log_spoof_warnings: False
+  log_spoof_warnings: True
 
 training_config:
 
