@@ -1,25 +1,26 @@
 train:
   plot:
-    # zz0n17p5: 
-    #     slurm_id : 0
-    #     description: "ABS Coord Hack 3h CERRA - 6h time_step"
-    # h0hcwbum: 
-    #     slurm_id : 0
-    #     description : "ABS Coord Hack 3h CERRA - 3h time_step"
-    # sny1qhya:
-    #     slurm_id : 0
-    #     description: "ABS Coord Config 3h CERRA - 6h time_step"
-    # r1y604t1:
-    #     slurm_id : 0
-    #     description: "ABS Coord Hack 3h CERRA - 6h time_step - ema 1e-3"
-    g4xhc28l : 
+    h0hcwbum: 
         slurm_id : 0
-        description: "CERRA abs coords hack 3h - 3fstep"
+        description : "CERRA abs coords hack 3h - 1fstep"
         color: "tab:blue"
-    qjn65dhh : 
+    xiynjep9:
         slurm_id : 0
         description: "Resumed"
         color: "tab:blue"
+    
+    g4xhc28l : 
+        slurm_id : 0
+        description: "CERRA abs coords hack 3h - 3fstep"
+        color: "tab:green"
+    qjn65dhh : 
+        slurm_id : 0
+        description: "Resumed"
+        color: "tab:green"
+    oeo7ug33:
+        slurm_id : 0
+        description: "Resumed"
+        color: "tab:green"
 
     i3bb2qiz : 
         slurm_id : 0
@@ -29,3 +30,12 @@ train:
         slurm_id : 0
         description : "Resumed"
         color: "tab:orange"
+    u2wt355o:
+        slurm_id : 0
+        description: "Resumed"
+
+
+    
+    
+
+    

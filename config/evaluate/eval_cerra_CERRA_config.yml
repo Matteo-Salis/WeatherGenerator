@@ -6,7 +6,7 @@ global_plotting_options:
  fps: 2
 
 evaluation:
-  metrics  : ["rmse","bias","mae"]
+  metrics  : ["rmse"]
   regions: ["cerra"]
   summary_plots : true
   ratio_plots : true
@@ -39,13 +39,25 @@ default_streams:
       plot_animations: true
       
 run_ids :
-  g0uwkzc3 :
+  oo2plofd:
     #type: "json"
-    label: "CERRA abs coords hack 3h - 3fstep"
+    label: "CERRA abs coords hack 3h - 1fstep - E160"
     rank: "all"
     # color: "tab:yellow"
 
-  w29xqkci  :
+  d66iyn2w:
     #type: "json"
-    label: "CERRA abs coords hack 3h + surf wind - 3fstep"
+    label: "CERRA abs coords hack 3h - 3fstep - E160"
     rank: "all"
+    # color: "tab:yellow"
+
+  zksmorp0:
+    #type: "json"
+    label: "CERRA abs coords hack 3h + surf wind - 3fstep - E160"
+    rank: "all"
+
+  nsl8k8an:
+    #type: "json"
+    label: "CERRA abs coords hack 3h - 1fstep - E230"
+    rank: "all"
+    # color: "tab:yellow"
