@@ -12,10 +12,15 @@
 import numpy as np
 import torch
 from numpy.typing import NDArray
+from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
-from weathergen.model.attention import MultiCrossAttentionHeadVarlen
+from weathergen.model.attention import (
+    MultiCrossAttentionHeadVarlen,
+    MultiSelfAttentionHead,
+)
 from weathergen.model.layers import MLP
+from weathergen.model.positional_encoding import get_rope_mode
 from weathergen.utils.utils import get_dtype
 
 
@@ -30,8 +35,17 @@ def _sum_tensors(xs: list[torch.Tensor]) -> torch.Tensor:
 class SumFusion(torch.nn.Module):
     """Additive fusion: elementwise sum of the per-encoder regridded latents."""
 
+    name: "SumFusion"
+
     def __init__(self, cf: Config, num_encoders: int) -> None:
-        super().__init__()
+        """
+        Initialize the SumFusion with the configuration.
+
+        :param cf: Configuration object containing parameters for the engine.
+        :param num_encoders: Number of per-level encoders being fused.
+        """
+        super(SumFusion, self).__init__()
+        self.cf = cf
         self.num_encoders = num_encoders
 
     def reset_parameters(self) -> None:
@@ -51,19 +65,28 @@ class ConcatMLPFusion(torch.nn.Module):
     summation baseline. Cells not covered by a regional encoder contribute zero blocks.
     """
 
+    name: "ConcatMLPFusion"
+
     def __init__(self, cf: Config, num_encoders: int) -> None:
-        super().__init__()
-        dim = cf.ae_global_dim_embed
+        """
+        Initialize the ConcatMLPFusion with the configuration.
+
+        :param cf: Configuration object containing parameters for the engine.
+        :param num_encoders: Number of per-level encoders being fused.
+        """
+        super(ConcatMLPFusion, self).__init__()
+        self.cf = cf
         self.with_residual = cf.get("encoder_fusion_mlp_residual", True)
+
         self.mlp = MLP(
-            dim_in=num_encoders * dim,
-            dim_out=dim,
+            dim_in=num_encoders * self.cf.ae_global_dim_embed,
+            dim_out=self.cf.ae_global_dim_embed,
             num_layers=cf.get("encoder_fusion_mlp_num_layers", 2),
             hidden_factor=cf.get("encoder_fusion_mlp_hidden_factor", 1.0),
             pre_layer_norm=True,
             dropout_rate=cf.get("encoder_fusion_dropout_rate", 0.0),
-            norm_type=cf.norm_type,
-            norm_eps=cf.mlp_norm_eps,
+            norm_type=self.cf.norm_type,
+            norm_eps=self.cf.mlp_norm_eps,
         )
 
     def reset_parameters(self) -> None:
@@ -81,21 +104,25 @@ class ConcatMLPFusion(torch.nn.Module):
 
 
 class PerceiverFusion(torch.nn.Module):
-    """Per-cell learnable queries cross-attend into the covering encoders' latents.
+    """Per-cell learnable queries cross-attend into the covering encoders' latents."""
 
-    For each forecast-grid cell the KV set is the Q tokens of every encoder covering that cell;
-    varlen attention masks out non-covering encoders, so their (zero) latents never receive
-    attention mass.
-    """
+    name: "PerceiverFusion"
 
     def __init__(self, cf: Config, coverage_masks: NDArray) -> None:
-        super().__init__()
-        dim = cf.ae_global_dim_embed
-        self.num_queries = cf.ae_local_num_queries
+        """
+        Initialize the PerceiverFusion with the configuration.
+
+        :param cf: Configuration object containing parameters for the engine.
+        :param coverage_masks: (num_encoders, num_cells) bool, ordered by encoder level.
+        """
+        super(PerceiverFusion, self).__init__()
+        self.cf = cf
+        self.num_queries = self.cf.ae_local_num_queries
         self.num_encoders, self.num_cells = coverage_masks.shape
 
         self.q_fusion = torch.nn.Parameter(
-            torch.zeros(self.num_cells, self.num_queries, dim), requires_grad=True
+            torch.zeros(self.num_cells, self.num_queries, self.cf.ae_global_dim_embed),
+            requires_grad=True,
         )
 
         cell_idx, enc_idx = np.nonzero(coverage_masks.T)
@@ -107,31 +134,35 @@ class PerceiverFusion(torch.nn.Module):
         self.register_buffer("kv_lens", torch.zeros(self.num_cells + 1, dtype=torch.int32))
         self.register_buffer("q_lens", torch.zeros(self.num_cells + 1, dtype=torch.int32))
 
-        self.cross_attn = MultiCrossAttentionHeadVarlen(
-            dim,
-            dim,
-            num_heads=cf.get("encoder_fusion_num_heads", 16),
-            with_residual=True,
-            with_qk_lnorm=cf.get("encoder_fusion_with_qk_lnorm", True),
-            dropout_rate=cf.get("encoder_fusion_dropout_rate", 0.0),
-            with_flash=cf.with_flash_attention,
-            norm_type=cf.norm_type,
-            qk_norm_type=cf.get("qk_norm_type", cf.norm_type),
-            norm_eps=cf.norm_eps,
-            attention_dtype=get_dtype(cf.attention_dtype),
-        )
-        self.mlp = (
-            MLP(
-                dim,
-                dim,
-                with_residual=True,
-                dropout_rate=cf.get("encoder_fusion_dropout_rate", 0.0),
-                norm_type=cf.norm_type,
-                norm_eps=cf.mlp_norm_eps,
+        self.fusion_blocks = torch.nn.ModuleList()
+
+        for _ in range(cf.get("encoder_fusion_num_blocks", 2)):
+            self.fusion_blocks.append(
+                MultiCrossAttentionHeadVarlen(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_global_dim_embed,
+                    num_heads=cf.get("encoder_fusion_num_heads", 16),
+                    with_residual=True,
+                    with_qk_lnorm=cf.get("encoder_fusion_with_qk_lnorm", True),
+                    dropout_rate=cf.get("encoder_fusion_dropout_rate", 0.0),
+                    with_flash=self.cf.with_flash_attention,
+                    norm_type=self.cf.norm_type,
+                    qk_norm_type=cf.get("qk_norm_type", self.cf.norm_type),
+                    norm_eps=self.cf.norm_eps,
+                    attention_dtype=get_dtype(self.cf.attention_dtype),
+                )
             )
-            if cf.get("encoder_fusion_with_mlp", True)
-            else None
-        )
+            # MLP block
+            self.fusion_blocks.append(
+                MLP(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_global_dim_embed,
+                    with_residual=True,
+                    dropout_rate=cf.get("encoder_fusion_dropout_rate", 0.0),
+                    norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
+                )
+            )
 
     def reset_parameters(self) -> None:
         self.kv_gather_idx.data.copy_(torch.from_numpy(self._gather_np))
@@ -157,24 +188,91 @@ class PerceiverFusion(torch.nn.Module):
             q_lens = torch.cat([self.q_lens[:1], self.q_lens[1:].repeat(rs)])
             kv_lens = torch.cat([self.kv_lens[:1], self.kv_lens[1:].repeat(rs)])
 
-        out = self.cross_attn(q, kv, q_lens, kv_lens)
-        if self.mlp is not None:
-            out = self.mlp(out)
-        fused_cells = out.reshape(rs, num_cells, nq, dim)
-        return fused_cells, _sum_tensors(auxs)
+        for block in self.fusion_blocks:
+            q = checkpoint(block, q, kv, q_lens, kv_lens, use_reentrant=False)
+
+        return q.reshape(rs, num_cells, nq, dim), _sum_tensors(auxs)
+
+
+class FusionGlobalEngine(torch.nn.Module):
+    """Run a fusion strategy, then mix the fused latents across forecast-grid cells."""
+
+    name: "FusionGlobalEngine"
+
+    def __init__(self, cf: Config, fusion: torch.nn.Module) -> None:
+        """
+        Initialize the FusionGlobalEngine with the configuration.
+
+        :param cf: Configuration object containing parameters for the engine.
+        :param fusion: The per-cell fusion strategy to run before the global blocks.
+        """
+        super(FusionGlobalEngine, self).__init__()
+        self.cf = cf
+        self.fusion = fusion
+        rope_mode = get_rope_mode(self.cf)
+
+        self.global_blocks = torch.nn.ModuleList()
+
+        for _ in range(cf.get("encoder_fusion_global_num_blocks", 2)):
+            self.global_blocks.append(
+                MultiSelfAttentionHead(
+                    self.cf.ae_global_dim_embed,
+                    num_heads=self.cf.ae_global_num_heads,
+                    dropout_rate=self.cf.ae_global_dropout_rate,
+                    with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
+                    with_flash=self.cf.with_flash_attention,
+                    norm_type=self.cf.norm_type,
+                    qk_norm_type=cf.get("qk_norm_type", self.cf.norm_type),
+                    norm_eps=self.cf.norm_eps,
+                    attention_dtype=get_dtype(self.cf.attention_dtype),
+                    rope_mode=rope_mode,
+                )
+            )
+            # MLP block
+            self.global_blocks.append(
+                MLP(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_global_dim_embed,
+                    with_residual=True,
+                    dropout_rate=self.cf.ae_global_dropout_rate,
+                    hidden_factor=self.cf.ae_global_mlp_hidden_factor,
+                    norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
+                )
+            )
+
+    def reset_parameters(self) -> None:
+        self.fusion.reset_parameters()
+
+    def forward(
+        self, cells: list[torch.Tensor], auxs: list[torch.Tensor]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        fused_cells, fused_aux = self.fusion(cells, auxs)
+        tokens = fused_cells.flatten(1, 2)
+        aux_info = None
+        for block in self.global_blocks:
+            tokens = checkpoint(block, tokens, None, aux_info, use_reentrant=False)
+
+        return tokens.unflatten(1, fused_cells.shape[1:3]), fused_aux
 
 
 def create_fusion_module(cf: Config, coverage_masks: NDArray) -> torch.nn.Module:
-    """Build the fusion module selected by ``encoder_fusion_mode``.
+    """Build the fusion strategy selected by ``encoder_fusion_mode``, plus the global stage.
 
     ``coverage_masks`` is ``(num_encoders, num_cells_F)`` bool, ordered by encoder level.
+    Set ``encoder_fusion_global_num_blocks: 0`` to skip the global stage.
     """
     mode = cf.get("encoder_fusion_mode", "sum")
     num_encoders = coverage_masks.shape[0]
     if mode == "sum":
-        return SumFusion(cf, num_encoders)
+        fusion = SumFusion(cf, num_encoders)
     elif mode == "concat_mlp":
-        return ConcatMLPFusion(cf, num_encoders)
+        fusion = ConcatMLPFusion(cf, num_encoders)
     elif mode == "perceiver":
-        return PerceiverFusion(cf, coverage_masks)
-    assert False, f"unknown encoder_fusion_mode '{mode}' (sum, concat_mlp, perceiver)"
+        fusion = PerceiverFusion(cf, coverage_masks)
+    else:
+        assert False, f"unknown encoder_fusion_mode '{mode}' (sum, concat_mlp, perceiver)"
+
+    if cf.get("encoder_fusion_global_num_blocks", 2) > 0:
+        fusion = FusionGlobalEngine(cf, fusion)
+    return fusion
