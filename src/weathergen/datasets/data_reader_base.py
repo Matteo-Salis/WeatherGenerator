@@ -156,6 +156,7 @@ class ReaderData:
     data: NDArray[DType]
     datetimes: NDArray[NPDT64]
     is_spoof: bool = False
+    row_idxs: NDArray[np.int64] | None = None
 
     @staticmethod
     def empty(num_data_fields: int, num_geo_fields: int) -> "ReaderData":
@@ -210,6 +211,7 @@ class ReaderData:
             self.geoinfos[idx_valid],
             self.data[idx_valid],
             self.datetimes[idx_valid],
+            row_idxs=None if self.row_idxs is None else self.row_idxs[idx_valid],
         )
 
     def shuffle(self, rng, shuffle: bool, num_subset: int) -> "ReaderData":
@@ -245,6 +247,8 @@ class ReaderData:
         self.geoinfos = self.geoinfos[idxs_subset]
         self.data = self.data[idxs_subset]
         self.datetimes = self.datetimes[idxs_subset]
+        if self.row_idxs is not None:
+            self.row_idxs = self.row_idxs[idxs_subset]
 
         return self
 
@@ -301,6 +305,7 @@ class DataReaderBase(metaclass=ABCMeta):
     latitude in degrees from -90 (South) to +90 (North),
     and longitude in degrees from -180 (West) to +180 (East).
     """
+    grid_shape: tuple[int, int] | None = None
 
     # The fields that need to be set by the child classes
     source_channels: list[str] = abstract_attribute()

@@ -125,6 +125,9 @@ class DataReaderAnemoi(DataReaderTimestep):
         # caches lats and lons
         self.latitudes = _clip_lat(ds.latitudes)
         self.longitudes = _clip_lon(ds.longitudes)
+        shape = tuple(ds.field_shape or ())
+        fills_raster = len(shape) == 2 and shape[0] * shape[1] == len(self.latitudes)
+        self.grid_shape = shape if fills_raster else None
 
         # select/filter requested source channels
         if stream_info.get(str(stage) + "_source_channels") is None:

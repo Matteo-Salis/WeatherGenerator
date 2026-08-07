@@ -43,6 +43,12 @@ from weathergen.model.engines import (
 from weathergen.model.fusion import create_fusion_module
 from weathergen.model.latent_regrid import LatentRegridder
 from weathergen.model.layers import MLP, NamedLinear
+from weathergen.model.residual import (
+    UNetRefine,
+    build_residual_refine,
+    residual_grid_idx,
+    residual_prediction_mode,
+)
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
@@ -157,7 +163,14 @@ class Model(torch.nn.Module):
         coordinates to its physical space.
     """
 
-    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
+    def __init__(
+        self,
+        cf: Config,
+        sources_size,
+        targets_num_channels,
+        targets_coords_size,
+        grid_shapes: dict | None = None,
+    ):
         """
         Args:
             cf : Configuration with model parameters
@@ -166,6 +179,7 @@ class Model(torch.nn.Module):
                 embedding
             targets_coords_size : List with size of each input sample for coordinates target
                 embedding
+            grid_shapes : Native 2-D raster per stream, for grid_conv residual prediction
         """
         super(Model, self).__init__()
 
@@ -179,6 +193,7 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
+        self.grid_shapes = grid_shapes or {}
 
         self.embed_target_coords = None
         self.encoders: torch.nn.ModuleDict | None = None
@@ -304,6 +319,9 @@ class Model(torch.nn.Module):
         self.embed_target_coords = torch.nn.ModuleDict()
         self.target_token_engines = torch.nn.ModuleDict()
         self.pred_heads = torch.nn.ModuleDict()
+
+        self.residual_mode = residual_prediction_mode(cf)
+        self.residual_refine = torch.nn.ModuleDict()
 
         # determine stream names once so downstream components use consistent keys
         loss_terms = [
@@ -454,6 +472,18 @@ class Model(torch.nn.Module):
                         stream_name=stream_name,
                     )
 
+            # one refinement per stream that has a prediction head, whichever loop built it
+            for i_stream, stream_name in enumerate(self.streams.keys()):
+                if stream_name not in self.pred_heads:
+                    continue
+                refine = build_residual_refine(
+                    self.residual_mode,
+                    self.targets_num_channels[i_stream],
+                    self.grid_shapes.get(stream_name),
+                )
+                if refine is not None:
+                    self.residual_refine[stream_name] = refine
+
         # Latent heads for losses
         self.latent_heads = nn.ModuleDict()
         self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
@@ -514,6 +544,8 @@ class Model(torch.nn.Module):
             self.fusion.reset_parameters()
         if self.forecast_engine is not None:
             self.forecast_engine.reset_parameters()
+        for refine in self.residual_refine.values():
+            refine.reset_parameters()
 
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
@@ -706,6 +738,31 @@ class Model(torch.nn.Module):
 
         return output
 
+    def _residual_base(
+        self,
+        stream_name: StreamName,
+        step: int,
+        batch: ModelBatch,
+        t_coords_lens: list[int],
+        pred: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Input-time state at the points predicted at this step, gathered per sample. Samples without
+        a base (spoofed windows) contribute zeros.
+        """
+
+        bases = []
+        for n_points, sample in zip(t_coords_lens, batch.samples, strict=True):
+            sd = sample.streams_data[stream_name]
+            row_idxs = sd.target_row_idxs[step]
+            if sd.source_base is None or row_idxs is None:
+                bases.append(pred.new_zeros((n_points, pred.shape[-1])))
+            else:
+                bases.append(sd.source_base.index_select(0, row_idxs).to(pred.dtype))
+
+        # broadcast over the ensemble: members differ in their delta, not in the state it is from
+        return torch.cat(bases).unsqueeze(0)
+
     def predict_decoders(
         self,
         model_params: ModelParams,
@@ -806,6 +863,18 @@ class Model(torch.nn.Module):
 
                     # final prediction head to map back to physical space
                     pred = self.pred_heads[stream_name](tc_tokens)
+
+            if pred.numel() > 0 and self.residual_mode != "none":
+                pred = pred + self._residual_base(stream_name, step, batch, t_coords_lens, pred)
+
+                if stream_name in self.residual_refine:
+                    refine = self.residual_refine[stream_name]
+                    if isinstance(refine, UNetRefine):
+                        sds = [s.streams_data[stream_name] for s in batch.samples]
+                        idx = residual_grid_idx(sds, step, t_coords_lens, refine.cells, pred.device)
+                        pred = refine(pred, idx, len(batch))
+                    else:
+                        pred = refine(pred, tcls)
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)

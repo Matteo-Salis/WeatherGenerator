@@ -104,6 +104,12 @@ class StreamData:
         self.target_tokens = [torch.tensor([]) for _ in range(output_steps)]
         self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(output_steps)]
 
+        # residual prediction: input-time state, and the row of it backing each predicted point
+        self.source_base = None
+        self.target_row_idxs = [None for _ in range(output_steps)]
+        # grid_conv only: the image cell of each source row, read through target_row_idxs
+        self.source_grid_idx = None
+
         # source tokens per cell
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
         # length of source tokens per cell (without padding)
@@ -126,6 +132,10 @@ class StreamData:
         self.target_tokens = _pin_tensor_list(self.target_tokens)
         self.idxs_inv = _pin_tensor_list(self.idxs_inv)
         self.target_coords_raw = _pin_tensor_list(self.target_coords_raw)
+
+        self.source_base = _pin_tensor(self.source_base)
+        self.target_row_idxs = _pin_tensor_list(self.target_row_idxs)
+        self.source_grid_idx = _pin_tensor(self.source_grid_idx)
 
         # Pin source tensors
         self.source_tokens_cells = _pin_tensor_list(self.source_tokens_cells)
@@ -152,6 +162,14 @@ class StreamData:
         self.target_coords = [t.to(dv, non_blocking=True) for t in self.target_coords]
         self.target_coords_lens = [t.to(dv, non_blocking=True) for t in self.target_coords_lens]
         self.target_tokens = [t.to(dv, non_blocking=True) for t in self.target_tokens]
+
+        if self.source_base is not None:
+            self.source_base = self.source_base.to(dv, non_blocking=True)
+        if self.source_grid_idx is not None:
+            self.source_grid_idx = self.source_grid_idx.to(dv, non_blocking=True)
+        self.target_row_idxs = [
+            t.to(dv, non_blocking=True) if t is not None else None for t in self.target_row_idxs
+        ]
 
         # move to device if source data is present
         if not np.array([s is None for s in self.source_tokens_cells]).all():
@@ -258,6 +276,7 @@ class StreamData:
         times_raw: torch.Tensor,
         idxs_inv: torch.Tensor,
         is_spoof: bool,
+        row_idxs: torch.Tensor | None = None,
     ) -> None:
         """
         Add data for target for one input.
@@ -279,6 +298,8 @@ class StreamData:
               absolute target times
         idxs_inv:
             Indices to reorder targets back to order in input
+        row_idxs:
+            Row of the native read each target was tokenized from, for residual prediction
 
         Returns
         -------
@@ -293,6 +314,7 @@ class StreamData:
         self.target_times_raw[fstep] = times_raw
         self.target_coords_raw[fstep] = target_coords_raw
         self.idxs_inv[fstep] = idxs_inv
+        self.target_row_idxs[fstep] = row_idxs
 
         self.target_is_spoof[fstep] = is_spoof
 
@@ -303,6 +325,7 @@ class StreamData:
         target_coords: torch.Tensor,
         target_coords_per_cell: torch.Tensor,
         is_spoof: bool,
+        row_idxs: torch.Tensor | None = None,
     ) -> None:
         """
         Add data for target for one input.
@@ -332,6 +355,7 @@ class StreamData:
 
         self.target_coords[fstep] = target_coords
         self.target_coords_lens[fstep] = target_coords_per_cell
+        self.target_row_idxs[fstep] = row_idxs
 
         self.target_is_spoof[fstep] = is_spoof
 

@@ -133,6 +133,7 @@ class IOReaderData:
     data: NDArray[DType]
     datetimes: NDArray[NPDT64]
     is_spoof: bool = False
+    row_idxs: NDArray[np.int64] | None = None
 
     def is_empty(self):
         """
@@ -175,6 +176,8 @@ class IOReaderData:
         data = np.zeros((0, other.data.shape[1]), dtype=other.data.dtype)
         datetimes = np.array([], dtype=other.datetimes.dtype)
         is_spoof = True
+        with_rows = all(o.row_idxs is not None for o in others)
+        row_idxs = np.array([], dtype=np.int64) if with_rows else None
 
         for other in others:
             n_datapoints = len(other.data)
@@ -187,8 +190,10 @@ class IOReaderData:
             data = np.concatenate([data, other.data])
             datetimes = np.concatenate([datetimes, other.datetimes])
             is_spoof = is_spoof and other.is_spoof
+            if with_rows:
+                row_idxs = np.concatenate([row_idxs, other.row_idxs])
 
-        return cls(coords, geoinfos, data, datetimes, is_spoof)
+        return cls(coords, geoinfos, data, datetimes, is_spoof, row_idxs)
 
 
 @dataclasses.dataclass
