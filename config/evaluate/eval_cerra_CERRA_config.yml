@@ -6,7 +6,7 @@ global_plotting_options:
  fps: 2
 
 evaluation:
-  metrics  : ["rmse","bias","mae"]
+  metrics  : ["rmse"]
   regions: ["cerra"]
   summary_plots : true
   ratio_plots : true
@@ -23,13 +23,13 @@ evaluation:
   
 default_streams:
   CERRA:
-    channels: ['10si', '10wdir', 'tp', '2t'] #, "blah"]
+    channels: ['2t', 'msl', '10si', '10wdir', 'r_850', 't_850', 'u_850', 'v_850', 'z_850'] #, "blah"]
     evaluation:
       forecast_step: "all"
       sample: "all"
       ensemble: "mean"
     plotting:
-      sample: [0,15]
+      sample: [0,1,2,3]
       forecast_step: "all"
       ensemble: "mean"
       plot_maps: true
@@ -40,8 +40,16 @@ default_streams:
       
 run_ids :
 
+  sqkzr7h5:
+    label: "CERRA-baseline-coords-hack"
+    rank: "all"
+  
   oikse6ab:
-    label: "CERRA-baseline"
+    label: "CERRA-baseline-coords-config"
+    rank: "all"
+
+  tki7yn5w:
+    label: "CERRA-str-loss-coords-config"
     rank: "all"
 
   # lca7rnty :

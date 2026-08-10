@@ -1,8 +1,24 @@
 train:
   plot:
-    # srdq64fs : 
-    #     slurm_id : 0
-    #     description: "Pretraining"
+    srdq64fs : 
+        slurm_id : 0
+        description: "Wael-Pretraining"
+        color: "tab:blue"
     jcw6d6fh: 
         slurm_id : 0
-        description : "ST Finetuning"
+        description : "Wael-ST Finetuning"
+        color: "darkblue"
+    
+    srdq64fs : 
+        slurm_id : 0
+        description: "Pretraining-coords-config"
+        color: "tab:orange"
+    jcw6d6fh: 
+        slurm_id : 0
+        description : "ST Finetuning-coords-config"
+        color: "darkorange"
+
+    gh7wv8ce : 
+        slurm_id : 0
+        description: "Pretraining-coords-hack"
+        color: "tab:green"
