@@ -1,0 +1,35 @@
+global_plotting_options:
+  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+  regions: ["global"]
+  dpi_val : 300
+  ERA5:
+    marker_size: 4
+
+evaluation:
+  metrics  : ["rmse"]
+  regions: ["global"]
+  summary_plots : true
+  summary_dir: "/e/project1/weatherai/salis1/python_sketches/test"
+  print_summary: false #print out score values on screen. it can be verbose
+  plot_score_maps: false
+  log_scale: false
+  add_grid: true
+
+run_ids :
+  # ff0uxy4w:
+  # qfjqvah8: 3fstep
+  wafqjpl5: #6 fstep
+    label: "My model"
+    rank: "all"
+    streams:
+      ERA5:
+        channels: ["2t"]
+        evaluation:
+          sample: "all"
+          forecast_step: "all"
+        plotting:
+          sample: [0,1,2,3]
+          forecast_step: [1,2]
+          plot_maps: true
+          plot_animations: true
+          plot_histograms: false
