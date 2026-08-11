@@ -17,7 +17,7 @@ evaluation:
 
 default_streams:
   CERRA:
-    channels: ['10si', '10wdir', 'tp', '2t'] #, "blah"]
+    channels: ['10si', '10wdir', '2t'] #, "blah"]
     evaluation:
       forecast_step: "all"
       sample: "all"
@@ -36,16 +36,34 @@ run_ids :
 
   lca7rnty:
     #type: "json"
-    label: "CERRA-baseline-Wael"
+    label: "Wael-Pretraining"
     rank: "all"
-    # color: "tab:yellow"
-  oikse6ab:
-    #type: "json"
-    label: "CERRA-baseline"
-    rank: "all"
-    # color: "tab:yellow"
+    color: "tab:blue"
   nle7pvpz:
     #type: "json"
-    label: "CERRA-str-loss-ft-Wael"
+    label: "Wael-ST Finetuning"
     rank: "all"
-    # color: "tab:yellow"
+    color: "darkblue"
+
+  oikse6ab:
+    #type: "json"
+    label: "Pretraining-coords-config"
+    rank: "all"
+    color: "tab:red"
+  tki7yn5w:
+    #type: "json"
+    label: "ST Finetuning-coords-config"
+    rank: "all"
+    color: "darkred"
+  
+  sqkzr7h5:
+    #type: "json"
+    label: "Pretraining-coords-hack"
+    rank: "all"
+    color: "tab:green"
+  qed9sgn0:
+    #type: "json"
+    label: "ST Finetuning-coords-hack"
+    rank: "all"
+    color: "darkgreen"
+  

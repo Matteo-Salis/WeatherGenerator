@@ -9,16 +9,20 @@ train:
         description : "Wael-ST Finetuning"
         color: "darkblue"
     
-    srdq64fs : 
+    la5nfskr : 
         slurm_id : 0
         description: "Pretraining-coords-config"
-        color: "tab:orange"
-    jcw6d6fh: 
+        color: "tab:red"
+    hgjeze93: 
         slurm_id : 0
         description : "ST Finetuning-coords-config"
-        color: "darkorange"
+        color: "darkred"
 
     gh7wv8ce : 
         slurm_id : 0
         description: "Pretraining-coords-hack"
         color: "tab:green"
+    dkmt08yz : 
+        slurm_id : 0
+        description : "ST Finetuning-coords-hack"
+        color: "darkgreen"

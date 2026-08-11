@@ -23,7 +23,7 @@ evaluation:
   
 default_streams:
   CERRA:
-    channels: ['2t', 'msl', '10si', '10wdir', 'r_850', 't_850', 'u_850', 'v_850', 'z_850'] #, "blah"]
+    channels: ['2t', 'msl', tp, '10si', '10wdir', 'r_850', 't_850', 'u_850', 'v_850', 'z_850'] #, "blah"]
     evaluation:
       forecast_step: "all"
       sample: "all"
@@ -40,27 +40,36 @@ default_streams:
       
 run_ids :
 
-  sqkzr7h5:
-    label: "CERRA-baseline-coords-hack"
+  lca7rnty:
+    #type: "json"
+    label: "Wael-Pretraining"
     rank: "all"
-  
+    color: "tab:blue"
+  nle7pvpz:
+    #type: "json"
+    label: "Wael-ST Finetuning"
+    rank: "all"
+    color: "darkblue"
+
   oikse6ab:
-    label: "CERRA-baseline-coords-config"
+    #type: "json"
+    label: "Pretraining-coords-config"
     rank: "all"
-
+    color: "tab:red"
   tki7yn5w:
-    label: "CERRA-str-loss-coords-config"
+    #type: "json"
+    label: "ST Finetuning-coords-config"
     rank: "all"
-
-  # lca7rnty :
-  #   #type: "json"
-  #   label: "CERRA-baseline-Wael"
-  #   rank: "all"
-  #   # color: "tab:yellow"
-
-  # nle7pvpz :
-  #   #type: "json"
-  #   label: "CERRA-str-loss-ft-Wael"
-  #   rank: "all"
-  #   # color: "tab:yellow"
+    color: "darkred"
+  
+  sqkzr7h5:
+    #type: "json"
+    label: "Pretraining-coords-hack"
+    rank: "all"
+    color: "tab:green"
+  qed9sgn0:
+    #type: "json"
+    label: "ST Finetuning-coords-hack"
+    rank: "all"
+    color: "darkgreen"
 
