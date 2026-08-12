@@ -84,7 +84,7 @@ class ConcatMLPFusion(torch.nn.Module):
             num_layers=cf.get("encoder_fusion_mlp_num_layers", 2),
             hidden_factor=cf.get("encoder_fusion_mlp_hidden_factor", 1.0),
             pre_layer_norm=True,
-            dropout_rate=cf.get("encoder_fusion_dropout_rate", 0.0),
+            dropout_rate=cf.get("encoder_fusion_dropout_rate", 0.1),
             norm_type=self.cf.norm_type,
             norm_eps=self.cf.mlp_norm_eps,
         )
@@ -124,6 +124,7 @@ class PerceiverFusion(torch.nn.Module):
             torch.zeros(self.num_cells, self.num_queries, self.cf.ae_global_dim_embed),
             requires_grad=True,
         )
+        self.full_coverage = bool(coverage_masks.all())
 
         cell_idx, enc_idx = np.nonzero(coverage_masks.T)
         self._gather_np = (cell_idx * self.num_encoders + enc_idx).astype(np.int64)
@@ -141,10 +142,11 @@ class PerceiverFusion(torch.nn.Module):
                 MultiCrossAttentionHeadVarlen(
                     self.cf.ae_global_dim_embed,
                     self.cf.ae_global_dim_embed,
+                    dim_head_proj=cf.get("encoder_fusion_embed", 128),
                     num_heads=cf.get("encoder_fusion_num_heads", 16),
-                    with_residual=True,
+                    with_residual=cf.get("encoder_fusion_with_residual", True),
                     with_qk_lnorm=cf.get("encoder_fusion_with_qk_lnorm", True),
-                    dropout_rate=cf.get("encoder_fusion_dropout_rate", 0.0),
+                    dropout_rate=cf.get("encoder_fusion_dropout_rate", 0.1),
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
                     qk_norm_type=cf.get("qk_norm_type", self.cf.norm_type),
@@ -158,7 +160,7 @@ class PerceiverFusion(torch.nn.Module):
                     self.cf.ae_global_dim_embed,
                     self.cf.ae_global_dim_embed,
                     with_residual=True,
-                    dropout_rate=cf.get("encoder_fusion_dropout_rate", 0.0),
+                    dropout_rate=cf.get("encoder_fusion_dropout_rate", 0.1),
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
                 )
@@ -177,9 +179,12 @@ class PerceiverFusion(torch.nn.Module):
         self, cells: list[torch.Tensor], auxs: list[torch.Tensor]
     ) -> tuple[torch.Tensor, torch.Tensor]:
         rs, num_cells, nq, dim = cells[0].shape
-        # (rs, num_cells, n_enc, Q, dim) -> gather the covered (cell, encoder) pairs, cell-major
-        x = torch.stack(cells, dim=2).flatten(1, 2)
-        kv = x.index_select(1, self.kv_gather_idx).reshape(-1, dim)
+        # (rs, num_cells, n_enc, Q, dim), cell-major so the encoders of a cell sit together
+        x = torch.stack(cells, dim=2)
+        if self.full_coverage:
+            kv = x.reshape(-1, dim)
+        else:
+            kv = x.flatten(1, 2).index_select(1, self.kv_gather_idx).reshape(-1, dim)
 
         q = self.q_fusion.unsqueeze(0).expand(rs, -1, -1, -1).reshape(-1, dim)
         if rs == 1:

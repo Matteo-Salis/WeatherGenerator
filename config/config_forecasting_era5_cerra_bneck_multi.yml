@@ -66,8 +66,10 @@ fe_impute_latent_noise_std: 1e-4
 forecast_att_dense_rate: 1.0
 
 
-fe_healpix_level: 3
-fe_healpix_active_region: null
+fe_healpix_level: 8
+fe_healpix_active_region:
+  name: europe  
+  rings: 1
 
 encoder_fusion_mode: sum # "sum", "concat_mlp", "perceiver"
 encoder_fusion_norm: False # per-level LayerNorm on each encoder's regridded latent before fusion
@@ -194,7 +196,7 @@ training_config:
   forecast :
       time_step: 06:00:00
       offset: 1
-      num_steps: 3
+      num_steps: 1
       policy: "fixed"
 
 

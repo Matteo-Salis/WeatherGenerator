@@ -197,11 +197,29 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     is_model_sharded = cf.with_ddp and cf.with_fsdp
     if is_model_sharded:
         meta_sharded_sd = model.state_dict()
+        model_buffer_names = {name for name, _ in model.named_buffers()}
         maybe_sharded_sd = {}
         for param_name, full_tensor in params.items():
             sharded_meta_param = meta_sharded_sd.get(param_name)
             if sharded_meta_param is None:
                 logger.warning(f"Parameter {param_name} from checkpoint not found in model.")
+                continue
+            if sharded_meta_param.shape != full_tensor.shape:
+                parent = param_name.rsplit(".", 1)[0]
+                parent_module = dict(model.named_modules()).get(parent)
+                parent_has_params = parent_module is not None and any(
+                    True for _ in parent_module.parameters()
+                )
+                assert param_name in model_buffer_names and not parent_has_params, (
+                    f"Shape mismatch for {param_name}: checkpoint has {tuple(full_tensor.shape)}, "
+                    f"model expects {tuple(sharded_meta_param.shape)}. Rebuilding it would "
+                    f"re-initialise '{parent}' and discard its learned weights; make the "
+                    "config's grid geometry match the checkpoint instead."
+                )
+                logger.warning(
+                    f"Rebuilding geometry buffer {param_name} from the current grid: checkpoint "
+                    f"{tuple(full_tensor.shape)}, model {tuple(sharded_meta_param.shape)}."
+                )
                 continue
             if isinstance(sharded_meta_param, DTensor):
                 sharded_tensor = distribute_tensor(

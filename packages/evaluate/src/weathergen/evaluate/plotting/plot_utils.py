@@ -828,6 +828,9 @@ def psd_plot_metric_region(
 
     for stream in streams_set:
         for ch in channels_set:
+            # forecast step -> (datasets, labels), accumulated over every run
+            per_fstep: dict[int, tuple[list[dict], list[str]]] = {}
+
             for run_id, data in scores_dict[metric][region].get(stream, {}).items():
                 if ch not in np.atleast_1d(data.channel.values):
                     continue
@@ -847,20 +850,24 @@ def psd_plot_metric_region(
                     psd_datasets = _extract_psd_attrs(data_ch, fstep, ch)
                     if psd_datasets is None:
                         continue
+                    datasets, labels = per_fstep.setdefault(fstep, ([], []))
+                    datasets.extend(psd_datasets)
+                    labels.extend([label] * len(psd_datasets))
 
-                    method_tag = psd_datasets[0].get("psd_method", "sht")
-                    name = create_filename(
-                        prefix=[metric, method_tag, region],
-                        middle=[run_id],
-                        suffix=[stream, ch, f"fstep{fstep}"],
-                    )
-                    plotter.psd_plot(
-                        psd_datasets,
-                        [label],
-                        tag=name,
-                        variable=ch,
-                        forecast_step=str(fstep),
-                    )
+            for fstep, (datasets, labels) in sorted(per_fstep.items()):
+                method_tag = datasets[0].get("psd_method", "sht")
+                name = create_filename(
+                    prefix=[metric, method_tag, region],
+                    middle=["allruns"],
+                    suffix=[stream, ch, f"fstep{fstep}"],
+                )
+                plotter.psd_plot(
+                    datasets,
+                    labels,
+                    tag=name,
+                    variable=ch,
+                    forecast_step=str(fstep),
+                )
     _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
 
 

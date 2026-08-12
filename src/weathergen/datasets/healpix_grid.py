@@ -112,15 +112,18 @@ def resolve_region_cells(
     """Native nested cell ids of a region, grown by a ``rings`` buffer of neighbouring cells.
 
     The region is either a geographic box (``name``, or explicit ``lat``/``lon``) or, with
-    ``from_data: true``, the exact footprint of the stream's dataset. The buffer is measured
+    ``from_data: true``, the exact footprint of a dataset. The buffer is measured
     in cells, so a fixed ring count covers a smaller geographic extent at finer levels.
     """
     if region.get("from_data", False):
-        assert stream_info is not None, (
-            "healpix_active_region 'from_data' needs the stream's info to resolve; use it in a "
-            "stream config, or 'from_stream: <STREAM>' for fe_healpix_active_region."
+        # a region naming its own dataset borrows that footprint; otherwise use the stream's
+        source_info = region if region.get("filenames") else stream_info
+        assert source_info is not None, (
+            "healpix_active_region 'from_data' needs a dataset to resolve against: use it in a "
+            "stream config, give the region its own 'filenames', or use "
+            "'from_stream: <STREAM>' for fe_healpix_active_region."
         )
-        selected = _coverage_cells(level, stream_info, data_paths)
+        selected = _coverage_cells(level, source_info, data_paths)
     else:
         selected = _box_cells(level, region)
 
@@ -174,11 +177,18 @@ def forecast_region(cf):
     """Active region for the forecast/decode grid (grid_F).
 
     Supports ``from_stream: <STREAM>`` to use the exact data footprint of the named stream,
-    plus an optional ``rings`` buffer, as the forecast grid.
+    plus an optional ``rings`` buffer, as the forecast grid. A region carrying its own
+    ``from_data`` + ``filenames`` is resolved here too, since NativeGrid has no data_paths
+    with which to locate the dataset.
     """
     region = cf.get("fe_healpix_active_region", cf.get("healpix_active_region", None))
     if OmegaConf.is_config(region):
         region = OmegaConf.to_container(region, resolve=True)
+
+    if isinstance(region, dict) and region.get("from_data", False) and region.get("filenames"):
+        return resolve_region_cells(
+            forecast_level(cf), region, None, list(cf.get("data_paths", []))
+        )
 
     name = region.get("from_stream") if isinstance(region, dict) else None
     if name is None:
