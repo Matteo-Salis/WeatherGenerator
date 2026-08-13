@@ -1,0 +1,30 @@
+CERRA :
+  type : anemoi
+  anemoi_config:
+    dataset: 'cerra-rr-an-oper-se-al-ec-mars-5p5km-1985-2023-3h-v2'
+    trim_edge: 100 
+  stream_id : 1
+  frequency: 3h
+  source : [ '2t', 'msl', 'r_850', 't_850', 'u_850', 'v_850', 'z_850']
+  target : [ '2t', 'msl', 'r_850', 't_850', 'u_850', 'v_850', 'z_850']
+  geoinfo_channels : [ 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
+  loss_weight : 1.
+  token_size : 16
+  max_num_targets: 375000 
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 256
+    num_blocks : 2
+  # pred_spatial_shared: ERA5
+  embed_target_coords :
+    net : linear
+    dim_embed : 256
+  target_readout :
+    type : 'obs_value'
+    num_layers : 2
+    num_heads : 4
+  pred_head :
+    ens_size : 1
+    num_layers : 1
