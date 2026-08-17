@@ -17,8 +17,9 @@ evaluation:
 
 run_ids :
   # ff0uxy4w:
-  # qfjqvah8: 3fstep
-  wafqjpl5: #6 fstep
+  # qfjqvah8: 3fstep Jupiter
+  # wafqjpl5: #6 fstep Jupiter
+  jc8md5ag:
     label: "My model"
     rank: "all"
     streams:
