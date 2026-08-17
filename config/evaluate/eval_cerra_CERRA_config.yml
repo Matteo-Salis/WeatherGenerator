@@ -53,7 +53,7 @@ run_ids :
       
       sqoiwyqo:
           label: "CERRA abs hack 3h-3h - ema 600"
-          color: "tab:blue"
+          color: "tab:orange"
           rank: "all"
 
       zozst8cy:
