@@ -23,7 +23,7 @@ evaluation:
   
 default_streams:
   CERRA:
-    channels: ["2t", "msl", "10si", "10wdir", "r_850", "t_850", "u_850", "v_850", "z_850"] #, "blah"]
+    channels: ["2t", "msl", "r_850", "t_850", "u_850", "v_850", "z_850"] #, "blah"]
     evaluation:
       forecast_step: "all"
       sample: "all"
@@ -39,103 +39,147 @@ default_streams:
       plot_animations: true
       
 run_ids :
-  # anjop5jc:
+
+
+      d66ybgzi:
+        label: "CERRA rel coord 3h-3h - ema 1e-3"
+        color: "tab:red"
+        rank: "all"
+
+      n5620w0v:
+          label: "CERRA abs hack 3h-3h - ema 1e-3"
+          color: "tab:blue"
+          rank: "all"
+      
+      sqoiwyqo:
+          label: "CERRA abs hack 3h-3h - ema 600"
+          color: "tab:blue"
+          rank: "all"
+
+      zozst8cy:
+          label: "CERRA abs config 3h-3h - ema 1e-3"
+          color: "tab:green"
+          rank: "all"
+
+      euzaa9w5:
+          label: "CERRA abs hack 3h-3h - unembed block - ema 1e-3"
+          color: "tab:purple"
+          rank: "all"
+
+      j9e9d371:
+          label: "CERRA abs hack 3h-3h - ext fields - ema 1e-3"
+          color: "tab:pink"
+          rank: "all"
+
+      p4zy2yt4:
+          label: "CERRA abs hack 3h-3h - ema 1e-3 - C.L. decoder"
+          color: "tab:brown"
+          rank: "all"
+
+
+      
+
+
+
+
+
+  # # anjop5jc:
+  # #   #type: "json"
+  # #   label: "CERRA coord hack 3h-6h - 1fstep - E128"
+  # #   rank: "all"
+  # #   color: "tab:blue"
+  
+  # h4gmfgxk:
   #   #type: "json"
-  #   label: "CERRA coord hack 3h-6h - 1fstep - E128"
+  #   label: "CERRA coord hack 3h-6h - 1fstep - E210"
+  #   rank: "all"
+  #   color: "darkblue"
+
+  # wr6313s0:
+  #   #type: "json"
+  #   label: "CERRA coord hack 3h-6h - 1fstep - E256"
   #   rank: "all"
   #   color: "tab:blue"
-  
-  h4gmfgxk:
-    #type: "json"
-    label: "CERRA coord hack 3h-6h - 1fstep - E210"
-    rank: "all"
-    color: "darkblue"
 
-  wr6313s0:
-    #type: "json"
-    label: "CERRA coord hack 3h-6h - 1fstep - E256"
-    rank: "all"
-    color: "tab:blue"
-
-  iwwxh4gj:
-    #type: "json"
-    label: "CERRA coord hack 6h-6h - 1fstep - E210"
-    rank: "all"
-    color: "red"
-
-  o9znnxt6:
-    #type: "json"
-    label: "CERRA coord hack 6h-6h - 1fstep - E256"
-    rank: "all"
-    color: "tab:red"
-
-  # ssc50lcg:
+  # iwwxh4gj:
   #   #type: "json"
-  #   label: "CERRA coord hack 3h-3h - 1fstep - 128"
+  #   label: "CERRA coord hack 6h-6h - 1fstep - E210"
   #   rank: "all"
-  #   color: "tab:orange"
+  #   color: "red"
 
-  p7m760wc:
-    #type: "json"
-    label: "CERRA coord hack 3h-3h - 1fstep - E210"
-    rank: "all"
-    color: "orange"
-
-  sqoiwyqo:
-    #type: "json"
-    label: "CERRA coord hack 3h-3h - 1fstep - E256"
-    rank: "all"
-    color: "tab:orange"
-
-  # s9a4ybry:
+  # o9znnxt6:
   #   #type: "json"
-  #   label: "CERRA coord config 3h-3h - 1fstep - E128"
-  #   rank: "all"
-  #   color: "tab:green"
-
-  # b0hsmun4:
-  #   #type: "json"
-  #   label: "CERRA coord hack 6h-6h - 1fstep - E128"
+  #   label: "CERRA coord hack 6h-6h - 1fstep - E256"
   #   rank: "all"
   #   color: "tab:red"
 
-  # gvd3azra:
-  #   #type: "json"
-  #   label: "CERRA coord hack 3h-3h - 1fstep - E128 - mnt: -1"
-  #   rank: "all"
-  #   color: "tab:purple"
+  # # ssc50lcg:
+  # #   #type: "json"
+  # #   label: "CERRA coord hack 3h-3h - 1fstep - 128"
+  # #   rank: "all"
+  # #   color: "tab:orange"
 
-  # zt8dihgw:
-  #   label: "CERRA coord hack 3h-3h - 3fstep - 128"
+  # p7m760wc:
+  #   #type: "json"
+  #   label: "CERRA coord hack 3h-3h - 1fstep - E210"
+  #   rank: "all"
+  #   color: "orange"
+
+  # sqoiwyqo:
+  #   #type: "json"
+  #   label: "CERRA coord hack 3h-3h - 1fstep - E256"
+  #   rank: "all"
+  #   color: "tab:orange"
+
+  # # s9a4ybry:
+  # #   #type: "json"
+  # #   label: "CERRA coord config 3h-3h - 1fstep - E128"
+  # #   rank: "all"
+  # #   color: "tab:green"
+
+  # # b0hsmun4:
+  # #   #type: "json"
+  # #   label: "CERRA coord hack 6h-6h - 1fstep - E128"
+  # #   rank: "all"
+  # #   color: "tab:red"
+
+  # # gvd3azra:
+  # #   #type: "json"
+  # #   label: "CERRA coord hack 3h-3h - 1fstep - E128 - mnt: -1"
+  # #   rank: "all"
+  # #   color: "tab:purple"
+
+  # # zt8dihgw:
+  # #   label: "CERRA coord hack 3h-3h - 3fstep - 128"
+  # #   rank: "all"
+  # #   color: "tab:brown"
+
+  # # s26tbvk8:
+  # #   label: "CERRA + surf wind coord hack 3h-3h - 3fstep - 128"
+  # #   rank: "all"
+  # #   color: "tab:pink"
+
+
+  # ybvdf773:
+  #   #type: "json"
+  #   label: "CERRA coord config 3h-3h - 1fstep - E210"
+  #   rank: "all"
+  #   color: "green"
+
+  # zozst8cy:
+  #   #type: "json"
+  #   label: "CERRA coord config 3h-3h - 1fstep - E256"
+  #   rank: "all"
+  #   color: "tab:green"
+
+  # yyfol4hc:
+  #   #type: "json"
+  #   label: "CERRA coord hack 3h-3h - 3fstep - E210"
   #   rank: "all"
   #   color: "tab:brown"
 
-  # s26tbvk8:
-  #   label: "CERRA + surf wind coord hack 3h-3h - 3fstep - 128"
+  # x9py94n6:
+  #   #type: "json"
+  #   label: "CERRA + surf wind coord hack 3h-3h - 3fstep - E210"
   #   rank: "all"
   #   color: "tab:pink"
-
-
-  ybvdf773:
-    #type: "json"
-    label: "CERRA coord config 3h-3h - 1fstep - E210"
-    rank: "all"
-    color: "green"
-
-  zozst8cy:
-    #type: "json"
-    label: "CERRA coord config 3h-3h - 1fstep - E256"
-    rank: "all"
-    color: "tab:green"
-
-  yyfol4hc:
-    #type: "json"
-    label: "CERRA coord hack 3h-3h - 3fstep - E210"
-    rank: "all"
-    color: "tab:brown"
-
-  x9py94n6:
-    #type: "json"
-    label: "CERRA + surf wind coord hack 3h-3h - 3fstep - E210"
-    rank: "all"
-    color: "tab:pink"
