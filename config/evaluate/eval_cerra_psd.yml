@@ -17,7 +17,7 @@ evaluation:
 
 default_streams:
   CERRA:
-    channels: ['10si', '10wdir', 'r_850', '2t'] #, "blah"]
+    channels: ['tp', '10si', '10wdir', 'r_850', '2t']
     evaluation:
       forecast_step: "all"
       sample: "all"
