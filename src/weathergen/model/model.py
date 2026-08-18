@@ -14,6 +14,7 @@ import math
 import typing
 import warnings
 import matplotlib.pyplot as plt
+import sys
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
@@ -200,7 +201,7 @@ class ModelParams(torch.nn.Module):
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
 
         dim_embed = cf.ae_global_dim_embed
-
+        print("*** DIM_EMBED:", dim_embed)
         if self.rope_2D:
             # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
             # Shape: (num_healpix_cells, ae_local_num_queries, 2)
@@ -230,6 +231,7 @@ class ModelParams(torch.nn.Module):
             .unsqueeze(1)
             .repeat((1, cf.ae_local_num_queries, 1))
         )
+        
         self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
             torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
         )
@@ -274,7 +276,8 @@ class ModelParams(torch.nn.Module):
         plt.savefig("/users/msalis/project/weather_generator/export/test/Local_PE_sin.jpg")
         
         # healpix neighborhood structure
-
+        sys.exit()
+        
         hlc = self.healpix_level
         num_healpix_cells = self.num_healpix_cells
         with warnings.catch_warnings(action="ignore"):
