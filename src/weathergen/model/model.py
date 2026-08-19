@@ -246,7 +246,7 @@ class ModelParams(torch.nn.Module):
         # rope_2D block above, because pe_global is initialised unconditionally while
         # that block is not.
         pe_verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
-        pe_verts = pe_verts[torch.from_numpy(self.domain.active_cells)]
+        # pe_verts = pe_verts[torch.from_numpy(self.domain.active_cells)]
         pe_coords = r3tos2(pe_verts.to(self.pe_global.device)).to(torch.float32)
         pe_lat = pe_coords[:, 0]
         pe_lon = torch.remainder(pe_coords[:, 1], 2 * torch.pi)
@@ -285,11 +285,11 @@ class ModelParams(torch.nn.Module):
             pe_geo.to(self.pe_global.dtype).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 1))
         )
         
-        # print("**** GLOBAL PE: ",  self.pe_global.data[..., 0::2].shape)
-        # print("**** PE values: ", self.pe_global.data[..., 0::2])
+        # print("**** GLOBAL PE: ",  self.pe_global.data.shape)
+        # # print("**** PE values: ", self.pe_global.data[..., 0::2])
         # # Convert the tensor to a NumPy array
         # data_np = self.pe_global.data[..., 0::2].squeeze().to(torch.float32).numpy()
-        # print("**** data_np: ", data_np)
+        # # print("**** data_np: ", data_np)
         # # Plot the 2D tensor as an image or heatmap
         # plt.figure(figsize=(15, 15))
         # plt.imshow(data_np[1000:2500, :])  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
@@ -297,7 +297,7 @@ class ModelParams(torch.nn.Module):
         # plt.title("GLOBAL PE sin")
         # plt.tight_layout()
         # plot_save_path = "/e/project1/weatherai/salis1/python_sketches/test"
-        # plt.savefig(f"{plot_save_path}/Global_PE_sin.jpg")
+        # plt.savefig(f"{plot_save_path}/Global_PE_sin_CL_zoom.jpg")
 
         # data_np = self.pe_global.data[..., 1::2].squeeze().to(torch.float32).numpy()
         # # Plot the 2D tensor as an image or heatmap
