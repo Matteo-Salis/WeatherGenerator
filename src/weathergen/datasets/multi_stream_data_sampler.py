@@ -80,7 +80,7 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
         )
         rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
-        logger.info(f"***** Sample --- Type: {type} --- Idx: {idx} ---Shuffle: {shuffle} --- Date: {np.unique(rdata.datetimes)}*****")
+        #logger.info(f"***** Sample --- Type: {type} --- Idx: {idx} ---Shuffle: {shuffle} --- Date: {np.unique(rdata.datetimes)}*****")
         rdatas += [rdata]
 
     return IOReaderData.combine(rdatas)
@@ -610,18 +610,18 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             output_data += [rdata]
             
-        logger.info(f"***** Input-Output Data Info: ")
-        logger.info(f"      -Input Data len: {len(input_data)}")
-        logger.info(f"      -Output Dat len: {len(output_data)}")
-        logger.info(f"      -Input Coords shape: {input_data[0].coords.shape}")
-        logger.info(f"      -Output Coords shape: {output_data[0].coords.shape}")
-        logger.info(f"      -Input Data shape: {input_data[0].data.shape}")
-        logger.info(f"      -Output Data shape: {output_data[0].data.shape}")
+        # logger.info(f"***** Input-Output Data Info: ")
+        # logger.info(f"      -Input Data len: {len(input_data)}")
+        # logger.info(f"      -Output Dat len: {len(output_data)}")
+        # logger.info(f"      -Input Coords shape: {input_data[0].coords.shape}")
+        # logger.info(f"      -Output Coords shape: {output_data[0].coords.shape}")
+        # logger.info(f"      -Input Data shape: {input_data[0].data.shape}")
+        # logger.info(f"      -Output Data shape: {output_data[0].data.shape}")
             
-        check_spatial_points_O = np.array_equal(output_data[0].coords,
-                                        output_data[1].coords,
-                                        equal_nan=True)
-        logger.info(f"      -Output coords consistency check: {check_spatial_points_O}")
+        # check_spatial_points_O = np.array_equal(output_data[0].coords,
+        #                                 output_data[1].coords,
+        #                                 equal_nan=True)
+        # logger.info(f"      -Output coords consistency check: {check_spatial_points_O}")
 
         return (input_data, output_data)
 

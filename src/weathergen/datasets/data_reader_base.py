@@ -241,7 +241,7 @@ class ReaderData:
         
         if shuffle is False:
             idxs_subset = np.sort(idxs_subset)
-            _logger.info(f"***** Sampling! First 10 idx: {idxs_subset[:10]}")
+            #_logger.info(f"***** Sampling! First 10 idx: {idxs_subset[:10]}")
             
         self.coords = self.coords[idxs_subset]
         self.geoinfos = self.geoinfos[idxs_subset]
