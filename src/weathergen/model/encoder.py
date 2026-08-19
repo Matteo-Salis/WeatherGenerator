@@ -294,9 +294,10 @@ class EncoderModule(torch.nn.Module):
         # create register and latent tokens and prepend to latent spatial tokens
         num_extra_tokens = self.num_register_tokens + self.num_class_tokens
         pos_enc = positional_encoding_harmonic
-        #print("**** q_cells", self.q_cells.shape)
+        # print("**** q_cells", self.q_cells.shape) [1, 1, 1024]
         tokens_global_register_class = pos_enc(self.q_cells.repeat(rs, num_extra_tokens, 1))
-
+        # print("**** tokens_global_register_class", tokens_global_register_class.shape) [1, 0, 1024]
+        
         # TODO: re-enable or remove ae_local_queries_per_cell
         if self.cf.ae_local_queries_per_cell:
             tokens_global = (self.q_cells + model_params.pe_global).repeat(rs, 1, 1)
@@ -305,11 +306,13 @@ class EncoderModule(torch.nn.Module):
             tokens_global = self.q_cells.repeat(num_tokens, 1, 1) + model_params.pe_global
             tokens_global = tokens_global.repeat(rs, 1, 1)
 
+        # print("**** tokens_global before assim local", tokens_global.shape) [12288, 1, 1024]
         # apply local assimilation engine and project onto global latent vectors
         tokens_global_unmasked, posteriors = self.assimilate_local_project_chunked(
             tokens, tokens_global, cell_lens, model_params.q_cells_lens
         )
 
+        # print("**** tokens_global after assim local", tokens_global.shape) [12288, 1, 1024]
         # apply aggregation engine on unmasked tokens
         tokens_global_unmasked = self.aggregation_engine_unmasked(
             tokens_global_unmasked,
@@ -319,15 +322,17 @@ class EncoderModule(torch.nn.Module):
         )
 
         # final processing
-
+        # print("**** tokens_global after aggr", tokens_global.shape) [12288, 1, 1024]
         tokens_global = (
             torch.permute(tokens_global, [1, 0, 2])
             .squeeze()
             .reshape(rs, self.num_healpix_cells, -1)
         )
         # TODO, TODO, TODO: do we need this
+        # print("**** tokens_global permutation", tokens_global.shape) [1, 12288, 1024]
         tokens_global = torch.cat([tokens_global_register_class, tokens_global], dim=1)
 
+        # print("**** tokens_global cat", tokens_global.shape) [1, 12288, 1024]
         # create mask from cell lens
         mask_reg_class_tokens = (
             torch.ones(
@@ -351,5 +356,7 @@ class EncoderModule(torch.nn.Module):
             tokens_global.reshape([rs, num_tokens_tot, q_c_shape[-2], q_c_shape[-1]])
             #  removing this line because else they get added twice? + model_params.pe_global
         ).flatten(1, 2)
+        
+        # print("**** tokens_global final", tokens_global.shape) [1, 12288, 1024]
 
         return tokens_global, posteriors
