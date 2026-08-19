@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 import torch
-
+#import matplotlib.pyplot as plt
 
 ####################################################################################################
 def positional_encoding_harmonic(x):
@@ -20,8 +20,14 @@ def positional_encoding_harmonic(x):
     dim_embed = x.shape[-1]
     dev = x.device
     dtype = x.dtype
-
+    
+    # print("*** q_cells for PE", x.shape)
+    # print("*** dim_embed", dim_embed)
+    
     len_token_seq = x.shape[-2]
+    
+    # print("*** len_token_seq", len_token_seq)
+    
     pe = torch.zeros(len_token_seq, dim_embed, device=dev, dtype=dtype)
     position = torch.arange(0, len_token_seq, device=dev, dtype=dtype).unsqueeze(1)
     div = torch.exp(
@@ -30,6 +36,19 @@ def positional_encoding_harmonic(x):
 
     pe[:, 0::2] = torch.sin(position * div[: pe[:, 0::2].shape[1]])
     pe[:, 1::2] = torch.cos(position * div[: pe[:, 1::2].shape[1]])
+    
+    # # Convert the tensor to a NumPy array
+    # data_np = pe[..., 0::2].squeeze().to(torch.float32).cpu().numpy()
+    # print("**** data_np.shape: ", data_np.shape)
+    # plt.figure(figsize=(15, 15))
+    # plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+    # #plt.colorbar()  # Add a colorbar to show the scale
+    # plt.title("GLOBAL PE sin - agg engine")
+    # plt.tight_layout()
+    # plot_save_path = "/e/project1/weatherai/salis1/python_sketches/test"
+    # plt.savefig(f"{plot_save_path}/Global_PE_sin_agg_eng.jpg")
+
+    
     x = x + pe
 
     return x

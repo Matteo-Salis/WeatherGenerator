@@ -201,7 +201,7 @@ class ModelParams(torch.nn.Module):
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
 
         dim_embed = cf.ae_global_dim_embed
-        print("*** DIM_EMBED:", dim_embed)
+        #print("*** DIM_EMBED:", dim_embed)
         if self.rope_2D:
             # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
             # Shape: (num_healpix_cells, ae_local_num_queries, 2)
@@ -223,60 +223,58 @@ class ModelParams(torch.nn.Module):
         xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
         self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
             torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
-        )
-        self.pe_global.data[..., 0::2] += (
-            torch.sin(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
-            )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
+        )# for ae_local_num_queries:1 all 0!
+        
+        den = 1e4 ** (2 * torch.arange(dim_embed//2) / dim_embed)
+        token_indices = torch.arange(self.num_healpix_cells, device=self.pe_global.device)
+        alternative_pe_global = torch.outer(token_indices, 1/den)
+        alternative_pe_global_cos = torch.cos(alternative_pe_global)
+        alternative_pe_global_sin = torch.sin(alternative_pe_global)
+        
+        self.pe_global.data[..., 0::2] += (alternative_pe_global_sin.unsqueeze(1).repeat((1, cf.ae_local_num_queries, 1))
         )
         
         self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
             torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
-        )
-        self.pe_global.data[..., 1::2] += (
-            torch.cos(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
-            )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
+        ) # for ae_local_num_queries:1 all 1!
+        self.pe_global.data[..., 1::2] += (alternative_pe_global_cos.unsqueeze(1).repeat((1, cf.ae_local_num_queries, 1))
         )
         
-        print("**** GLOBAL PE: ",  self.pe_global.data[..., 0::2].shape)
-        print("**** PE values: ", self.pe_global.data[..., 0::2])
-        # Convert the tensor to a NumPy array
-        data_np = self.pe_global.data[..., 0::2].squeeze().to(torch.float32).numpy()
-        print("**** data_np: ", data_np)
-        # Plot the 2D tensor as an image or heatmap
-        plt.figure(figsize=(15, 15))
-        plt.imshow(data_np[1000:2500, :])  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
-        #plt.colorbar()  # Add a colorbar to show the scale
-        plt.title("GLOBAL PE sin")
-        plt.tight_layout()
-        plt.savefig("/users/msalis/project/weather_generator/export/test/Global_PE_sin.jpg")
+        # print("**** GLOBAL PE: ",  self.pe_global.data[..., 0::2].shape)
+        # print("**** PE values: ", self.pe_global.data[..., 0::2])
+        # # Convert the tensor to a NumPy array
+        # data_np = self.pe_global.data[..., 0::2].squeeze().to(torch.float32).numpy()
+        # print("**** data_np: ", data_np)
+        # # Plot the 2D tensor as an image or heatmap
+        # plt.figure(figsize=(15, 15))
+        # plt.imshow(data_np[1000:2500, :])  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+        # #plt.colorbar()  # Add a colorbar to show the scale
+        # plt.title("GLOBAL PE sin")
+        # plt.tight_layout()
+        # plot_save_path = "/e/project1/weatherai/salis1/python_sketches/test"
+        # plt.savefig(f"{plot_save_path}/Global_PE_sin.jpg")
 
-        data_np = self.pe_global.data[..., 1::2].squeeze().to(torch.float32).numpy()
-        # Plot the 2D tensor as an image or heatmap
-        plt.figure(figsize=(5, 5))
-        plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
-        #plt.colorbar()  # Add a colorbar to show the scale
-        plt.title("GLOBAL PE cos")
-        plt.tight_layout()
-        plt.savefig("/users/msalis/project/weather_generator/export/test/Global_PE_cos.jpg")
+        # data_np = self.pe_global.data[..., 1::2].squeeze().to(torch.float32).numpy()
+        # # Plot the 2D tensor as an image or heatmap
+        # plt.figure(figsize=(5, 5))
+        # plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+        # #plt.colorbar()  # Add a colorbar to show the scale
+        # plt.title("GLOBAL PE cos")
+        # plt.tight_layout()
+        # plt.savefig(f"{plot_save_path}/Global_PE_cos.jpg")
 
-        # Convert the tensor to a NumPy array
-        data_np = self.pe_embed.data[..., 0::2].squeeze().to(torch.float32).numpy()
-        # Plot the 2D tensor as an image or heatmap
-        plt.figure(figsize=(5, 5))
-        plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
-        #plt.colorbar()  # Add a colorbar to show the scale
-        plt.title("LOCAL PE sin")
-        plt.tight_layout()
-        plt.savefig("/users/msalis/project/weather_generator/export/test/Local_PE_sin.jpg")
+        # # Convert the tensor to a NumPy array
+        # data_np = self.pe_embed.data[..., 0::2].squeeze().to(torch.float32).numpy()
+        # # Plot the 2D tensor as an image or heatmap
+        # plt.figure(figsize=(5, 5))
+        # plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+        # #plt.colorbar()  # Add a colorbar to show the scale
+        # plt.title("LOCAL PE sin")
+        # plt.tight_layout()
+        # plt.savefig(f"{plot_save_path}/Local_PE_sin.jpg")
         
         # healpix neighborhood structure
-        sys.exit()
+        #sys.exit()
         
         hlc = self.healpix_level
         num_healpix_cells = self.num_healpix_cells
@@ -719,6 +717,7 @@ class Model(torch.nn.Module):
         output = ModelOutput(batch.get_output_len())
 
         tokens, posteriors = self.encoder(model_params, batch)
+        #print("***** TOKENS.SHAPE:", tokens.shape)
         output.add_latent_prediction(0, "posteriors", posteriors)
 
         # recover batch dimension and separate input_steps

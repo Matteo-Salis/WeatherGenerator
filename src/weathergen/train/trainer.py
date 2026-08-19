@@ -460,6 +460,7 @@ class Trainer(TrainerBase):
                     dtype=self.mixed_precision_dtype,
                     enabled=cf.with_mixed_precision,
                 ):
+                    #logger.info(f"******* BATCH : {bidx}")
                     preds = self.model(
                         model_params=self.model_params,
                         batch=batch.get_source_samples(),

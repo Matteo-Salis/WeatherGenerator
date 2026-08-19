@@ -121,7 +121,6 @@ class EncoderModule(torch.nn.Module):
         """
         Encoder forward
         """
-
         stream_cell_tokens = checkpoint(
             self.embed_engine, batch, model_params.pe_embed, use_reentrant=False
         )
@@ -231,7 +230,7 @@ class EncoderModule(torch.nn.Module):
         # permute to use ae_local_num_queries as the batchsize and no_of_tokens
         # as seq len for flash attention
         tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
-
+        #print("*** token lens:", tokens_lens)
         cell_lens_unflattened = torch.sum(tokens_lens, 2)
         cell_mask = cell_lens_unflattened.to(torch.bool)
         batch_lens = cell_mask.sum(dim=-1).flatten()
@@ -269,7 +268,7 @@ class EncoderModule(torch.nn.Module):
         tokens_global_unmasked = self.ae_aggregation_engine(
             tokens_global_unmasked, batch_lens_patched, use_reentrant=False, coords=packed_coords
         )
-
+        
         return tokens_global_unmasked
 
     def assimilate_local(
@@ -295,6 +294,7 @@ class EncoderModule(torch.nn.Module):
         # create register and latent tokens and prepend to latent spatial tokens
         num_extra_tokens = self.num_register_tokens + self.num_class_tokens
         pos_enc = positional_encoding_harmonic
+        #print("**** q_cells", self.q_cells.shape)
         tokens_global_register_class = pos_enc(self.q_cells.repeat(rs, num_extra_tokens, 1))
 
         # TODO: re-enable or remove ae_local_queries_per_cell
@@ -340,7 +340,7 @@ class EncoderModule(torch.nn.Module):
         )
         cell_lens_r = cell_lens.unsqueeze(0).reshape(rs, self.num_healpix_cells)
         mask = torch.cat([mask_reg_class_tokens, cell_lens_r.to(torch.bool)], dim=1)
-
+        # print("*** MASK SUM: ", torch.sum(mask))
         # fill empty tensor using mask for positions of unmasked tokens
         tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)
 
