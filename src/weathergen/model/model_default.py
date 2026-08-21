@@ -215,112 +215,68 @@ class ModelParams(torch.nn.Module):
             self.rope_coords.data.fill_(0.0)
             self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
 
-        # Cristian Lusanna
         # pe_global: always initialized. RoPE handles relative position in Q/K, but pe_global
         # provides per-cell token identity which is critical for masked cells that have no
         # content from local assimilation. Without it, masked cells are identical and the
         # teacher representation (evaluated without dropout) collapses to low rank.
-        #
-        # The encoding is GEOGRAPHIC, not index-based. The previous version used
-        # sin(c * xs_k) on the compact cell index c; because active_cells is sorted, c is
-        # monotone in the global nested index and hence in the level-5 parent, so the
-        # lowest-frequency components (period ~1024 in c) were near-constant within each
-        # coarse parent and showed up as visible blocks in the latent. A multi-scale
-        # sin/cos encoding of (lat, lon) is continuous across the sphere, has no
-        # hierarchical seams, and still gives every cell a distinct code.
         self.pe_global.data.fill_(0.0)
         xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
-
-        # --- query-identity term (unchanged) -----------------------------------
-        # With ae_local_num_queries == 1 this is a constant; kept so that >1 still works.
         self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
             torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
+        )
+        self.pe_global.data[..., 0::2] += (
+            torch.sin(
+                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+            )
+            .unsqueeze(1)
+            .repeat((1, cf.ae_local_num_queries, 1))
         )
         self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
             torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
         )
-
-        # --- geographic cell-identity term -------------------------------------
-        # Cell centres in the codebase's convention. r3tos2 returns azimuth wrapped to
-        # (-pi, pi] by atan2; remainder() unwraps it to [0, 2pi) so that a domain
-        # straddling the wrap is continuous. Recomputed here rather than reused from the
-        # rope_2D block above, because pe_global is initialised unconditionally while
-        # that block is not.
-        pe_verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
-        # pe_verts = pe_verts[torch.from_numpy(self.domain.active_cells)]
-        pe_coords = r3tos2(pe_verts.to(self.pe_global.device)).to(torch.float32)
-        pe_lat = pe_coords[:, 0]
-        pe_lon = torch.remainder(pe_coords[:, 1], 2 * torch.pi)
-
-        # GLOBAL normalisation to [0, 1]: portable across domains, so a checkpoint's PE
-        # means the same thing for a regional and a global run. lat in [-pi/2, pi/2],
-        # lon in [0, 2pi).
-        u_lat = (pe_lat + torch.pi / 2) / torch.pi
-        u_lon = pe_lon / (2 * torch.pi)
-
-        # Geometric frequency ladder from 1 cycle per globe up to ~4 cycles per healpix
-        # cell, so the finest scale resolves individual cells while the coarsest is
-        # smooth over the sphere. dim_embed is split 4 ways: sin/cos x lat/lon.
-        n_freq = dim_embed // 4
-        cell_frac = (58.6 / (2**self.healpix_level)) / 360.0
-        max_freq = 4.0 / cell_frac
-        freqs = torch.exp(
-            torch.linspace(
-                0.0, float(np.log(max_freq)), n_freq, device=self.pe_global.device
+        self.pe_global.data[..., 1::2] += (
+            torch.cos(
+                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
             )
-        )
-
-        ang_lat = 2 * torch.pi * torch.outer(u_lat, freqs)
-        ang_lon = 2 * torch.pi * torch.outer(u_lon, freqs)
-        pe_geo = torch.cat(
-            [torch.sin(ang_lat), torch.cos(ang_lat), torch.sin(ang_lon), torch.cos(ang_lon)],
-            dim=-1,
-        )  # (num_healpix_cells, 4 * n_freq)
-
-        assert pe_geo.shape[-1] == dim_embed, (
-            f"geographic pe_global width {pe_geo.shape[-1]} != dim_embed {dim_embed}; "
-            "ae_global_dim_embed must be divisible by 4."
-        )
-
-        self.pe_global.data += (
-            pe_geo.to(self.pe_global.dtype).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 1))
+            .unsqueeze(1)
+            .repeat((1, cf.ae_local_num_queries, 1))
         )
         
-        # print("**** GLOBAL PE: ",  self.pe_global.data.shape)
-        # # print("**** PE values: ", self.pe_global.data[..., 0::2])
-        # # Convert the tensor to a NumPy array
-        # data_np = self.pe_global.data[..., 0::2].squeeze().to(torch.float32).numpy()
-        # # print("**** data_np: ", data_np)
-        # # Plot the 2D tensor as an image or heatmap
-        # plt.figure(figsize=(15, 15))
-        # plt.imshow(data_np[1000:2500, :])  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
-        # #plt.colorbar()  # Add a colorbar to show the scale
-        # plt.title("GLOBAL PE sin")
-        # plt.tight_layout()
-        # plot_save_path = "/e/project1/weatherai/salis1/python_sketches/test"
-        # plt.savefig(f"{plot_save_path}/Global_PE_sin_CL_zoom.jpg")
+        print("**** GLOBAL PE: ",  self.pe_global.data.shape)
+        # print("**** PE values: ", self.pe_global.data[..., 0::2])
+        # Convert the tensor to a NumPy array
+        data_np = self.pe_global.data[..., 0::2].squeeze().to(torch.float32).numpy()
+        # print("**** data_np: ", data_np)
+        # Plot the 2D tensor as an image or heatmap
+        plt.figure(figsize=(15, 15))
+        plt.imshow(data_np[1000:2500, :])  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+        #plt.colorbar()  # Add a colorbar to show the scale
+        plt.title("GLOBAL PE sin")
+        plt.tight_layout()
+        plot_save_path = "/e/project1/weatherai/salis1/python_sketches/test"
+        plt.savefig(f"{plot_save_path}/Global_PE_sin_def_zoom.jpg")
 
-        # data_np = self.pe_global.data[..., 1::2].squeeze().to(torch.float32).numpy()
-        # # Plot the 2D tensor as an image or heatmap
-        # plt.figure(figsize=(5, 5))
-        # plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
-        # #plt.colorbar()  # Add a colorbar to show the scale
-        # plt.title("GLOBAL PE cos")
-        # plt.tight_layout()
-        # plt.savefig(f"{plot_save_path}/Global_PE_cos.jpg")
+        data_np = self.pe_global.data[..., 1::2].squeeze().to(torch.float32).numpy()
+        # Plot the 2D tensor as an image or heatmap
+        plt.figure(figsize=(5, 5))
+        plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+        #plt.colorbar()  # Add a colorbar to show the scale
+        plt.title("GLOBAL PE cos")
+        plt.tight_layout()
+        plt.savefig(f"{plot_save_path}/Global_PE_cos.jpg")
 
-        # # Convert the tensor to a NumPy array
-        # data_np = self.pe_embed.data[..., 0::2].squeeze().to(torch.float32).numpy()
-        # # Plot the 2D tensor as an image or heatmap
-        # plt.figure(figsize=(5, 5))
-        # plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
-        # #plt.colorbar()  # Add a colorbar to show the scale
-        # plt.title("LOCAL PE sin")
-        # plt.tight_layout()
-        # plt.savefig(f"{plot_save_path}/Local_PE_sin.jpg")
+        # Convert the tensor to a NumPy array
+        data_np = self.pe_embed.data[..., 0::2].squeeze().to(torch.float32).numpy()
+        # Plot the 2D tensor as an image or heatmap
+        plt.figure(figsize=(5, 5))
+        plt.imshow(data_np)  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+        #plt.colorbar()  # Add a colorbar to show the scale
+        plt.title("LOCAL PE sin")
+        plt.tight_layout()
+        plt.savefig(f"{plot_save_path}/Local_PE_sin.jpg")
         
         # healpix neighborhood structure
-        #sys.exit()
+        sys.exit()
         
         hlc = self.healpix_level
         num_healpix_cells = self.num_healpix_cells
