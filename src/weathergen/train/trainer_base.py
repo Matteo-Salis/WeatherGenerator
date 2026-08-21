@@ -21,6 +21,10 @@ from weathergen.utils.distributed import is_root
 
 PORT = 1345
 
+# Ring-buffer depth of NCCL's flight recorder: the last N collectives per rank, dumped when a
+# collective times out so the stuck op and its SeqNum can be compared across ranks.
+FLIGHT_RECORDER_ENTRIES = 2048
+
 
 class TrainerBase:
     def __init__(self):
@@ -100,6 +104,10 @@ class TrainerBase:
             else:
                 device = torch.device("cpu")
                 print(f"Running on device {device}")
+
+            # both are read when the process group is built, so they have to be set first
+            os.environ.setdefault("TORCH_NCCL_TRACE_BUFFER_SIZE", str(FLIGHT_RECORDER_ENTRIES))
+            os.environ.setdefault("TORCH_NCCL_DUMP_ON_TIMEOUT", "1")
 
             backend = torch.distributed.get_default_backend_for_device(device)
             torch.distributed.init_process_group(

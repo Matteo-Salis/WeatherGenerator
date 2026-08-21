@@ -487,22 +487,26 @@ class StreamData:
         return len(self.target_tokens)
 
 
-def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderData:
+def spoof(healpix_level: int, datetime, geoinfo_size, num_channels, cells=None) -> IOReaderData:
     """
     Spoof an instance from data_reader_base.ReaderData instance.
     other should be such an instance.
+
+    ``cells`` restricts the spoofed points to a set of global nested cell ids. It must be the
+    active cells of the grid the caller will tokenize this data on: points landing outside an
+    active region are dropped by ``restrict_to_active``, which leaves the window empty again and
+    defeats the purpose of spoofing it.
     """
 
     dx = 0.5
     dy = 0.5
-    num_healpix_cells = 12 * 4**healpix_level
-    lons, lats = hp.healpix_to_lonlat(
-        np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
-    )
-
-    coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
+    if cells is None:
+        cells = np.arange(12 * 4**healpix_level)
     # spoof two tokens to avoid unnecessary computational load
-    coords = coords[np.random.choice(coords.shape[0], size=2, replace=False)]
+    cells = np.asarray(cells)
+    cells = cells[np.random.choice(cells.shape[0], size=min(2, cells.shape[0]), replace=False)]
+    lons, lats = hp.healpix_to_lonlat(cells, 2**healpix_level, dx=dx, dy=dy, order="nested")
+    coords = np.stack([lats.deg, lons.deg - 180.0], axis=-1, dtype=np.float32)
 
     geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
     data = np.zeros((coords.shape[0], num_channels), dtype=np.float32)

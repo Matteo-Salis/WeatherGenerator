@@ -293,9 +293,10 @@ class LossPhysical(LossModuleBase):
 
             stream_loss_weight, weights_channels = self._get_weights(stream_name, stream_info)
             if self.dynamic_loss_ema.enabled and weights_channels is not None:
-                losses_all[stream_name][str(self.forecast_offset)]["mse_ema_weight"] = {}
+                ema_weights = {}
+                losses_all[stream_name][str(self.forecast_offset)]["mse_ema_weight"] = ema_weights
                 for ch_n, w in zip(target_channels, weights_channels, strict=True):
-                    losses_all[stream_name][str(self.forecast_offset)]["mse_ema_weight"][ch_n] = w.item()
+                    ema_weights[ch_n] = w.item()
 
             # TODO: make nicer
             output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
@@ -365,7 +366,8 @@ class LossPhysical(LossModuleBase):
                         sw = 0.0 if is_spoof else 1.0
                         spoof_weight = torch.tensor(sw, device=self.device, requires_grad=False)
 
-                        # skip if either target or prediction has no data points
+                        # skip if either target or prediction has no data points; ranks must
+                        # agree on this or FSDP desyncs (Trainer._check_uniform_occupancy)
                         if not (target.shape[0] > 0 and pred.shape[0] > 0):
                             continue
 

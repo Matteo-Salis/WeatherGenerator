@@ -23,6 +23,48 @@ Some blocks optionally apply RoPE-like positional modulation. When enabled, the 
 provide per-token coordinates aligned with the token order (lat, lon in radians).
 """
 
+_MAX_VARLEN_SEQS = 65535
+
+
+def _varlen_attn(q, k, v, cu_q, cu_kv, max_q, max_kv, *, softcap, dropout_p):
+    """flash_attn_varlen_func, split over the sequence axis when it exceeds gridDim.y's cap.
+
+    Sequence counts at or below the cap take a single unmodified call, so existing
+    configurations keep the exact kernel invocation, numerics and RNG draw they had before.
+    The guard reads a shape rather than a tensor value, so it costs no device sync.
+    """
+    n_seq = cu_q.shape[0] - 1
+    if n_seq <= _MAX_VARLEN_SEQS:
+        return flash_attn_varlen_func(
+            q, k, v, cu_q, cu_kv, max_q, max_kv, softcap=softcap, dropout_p=dropout_p
+        )
+
+    # One host copy of the offsets up front, so slicing the token axis below needs no further
+    # device syncs. max_q/max_kv stay the global maxima: they are upper bounds for kernel
+    # configuration, so reusing them per chunk is correct.
+    cu_q_h = cu_q.tolist()
+    cu_kv_h = cu_kv.tolist()
+
+    outs = []
+    for i0 in range(0, n_seq, _MAX_VARLEN_SEQS):
+        i1 = min(i0 + _MAX_VARLEN_SEQS, n_seq)
+        q0, q1 = cu_q_h[i0], cu_q_h[i1]
+        kv0, kv1 = cu_kv_h[i0], cu_kv_h[i1]
+        outs.append(
+            flash_attn_varlen_func(
+                q[q0:q1],
+                k[kv0:kv1],
+                v[kv0:kv1],
+                cu_q[i0 : i1 + 1] - cu_q[i0],
+                cu_kv[i0 : i1 + 1] - cu_kv[i0],
+                max_q,
+                max_kv,
+                softcap=softcap,
+                dropout_p=dropout_p,
+            )
+        )
+    return torch.cat(outs)
+
 
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     def __init__(
@@ -112,7 +154,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
         cum_x_lens = torch.cumsum(x_lens, 0, dtype=torch.int32)
         # ordering of tensors (seq, heads, embed) (which differs from torch's flash attention implt)
-        outs = flash_attn_varlen_func(
+        outs = _varlen_attn(
             qs,
             ks,
             vs,
@@ -398,7 +440,7 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         if x_kv_lens is not None:
             cum_x_q_lens = torch.cumsum(x_q_lens, 0, dtype=torch.int32)
             cum_x_kv_lens = torch.cumsum(x_kv_lens, 0, dtype=torch.int32)
-            outs = flash_attn_varlen_func(
+            outs = _varlen_attn(
                 qs,
                 ks,
                 vs,
@@ -516,7 +558,7 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         outs = []
         for _i, qs_i in enumerate(qs):
             outs += [
-                flash_attn_varlen_func(
+                _varlen_attn(
                     qs_i,
                     ks,
                     vs,

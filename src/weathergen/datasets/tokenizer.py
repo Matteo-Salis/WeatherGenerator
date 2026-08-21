@@ -14,6 +14,7 @@ import numpy as np
 import torch
 
 from weathergen.datasets.utils import (
+    healpix_verts,
     healpix_verts_rots,
     r3tos2,
 )
@@ -29,8 +30,9 @@ class Tokenizer:
 
         # Sources are tokenized on the encoder's own grid (hl_source / grid_source); targets on the
         # forecast grid (hl_target / grid_target). When the target level/grid is omitted it mirrors
-        # the source, recovering the single-grid behaviour. Per-cell geometry is built full at each
-        # level then restricted to its active region.
+        # the source, recovering the single-grid behaviour. Per-cell geometry is built for the
+        # *active* cells of each level: full-globe arrays scale as 12 * 4**hl regardless of region
+        # size, which is 96 GB for hpy_verts_local_target alone at level 12.
         self.hl_source = hl_source
         self.hl_target = hl_target if hl_target is not None else hl_source
         self.grid_source = grid_source
@@ -48,11 +50,33 @@ class Tokenizer:
 
         self.size_time_embedding = 6
 
-        verts00_s, verts00_rots_s = healpix_verts_rots(self.hl_source, 0.0, 0.0)
-        verts10_s, verts10_rots_s = healpix_verts_rots(self.hl_source, 1.0, 0.0)
-        verts11_s, verts11_rots_s = healpix_verts_rots(self.hl_source, 1.0, 1.0)
-        verts01_s, verts01_rots_s = healpix_verts_rots(self.hl_source, 0.0, 1.0)
-        vertsmm_s, vertsmm_rots_s = healpix_verts_rots(self.hl_source, 0.5, 0.5)
+        # None means "whole globe", which is also what a full grid resolves to
+        cells_source = (
+            None
+            if self.grid_source is None or self.grid_source.is_full
+            else self.grid_source.active_to_global
+        )
+        cells_target = (
+            None
+            if self.grid_target is None or self.grid_target.is_full
+            else self.grid_target.active_to_global
+        )
+
+        verts00_s, verts00_rots_s = healpix_verts_rots(
+            self.hl_source, 0.0, 0.0, cells=cells_source
+        )
+        verts10_s, verts10_rots_s = healpix_verts_rots(
+            self.hl_source, 1.0, 0.0, cells=cells_source
+        )
+        verts11_s, verts11_rots_s = healpix_verts_rots(
+            self.hl_source, 1.0, 1.0, cells=cells_source
+        )
+        verts01_s, verts01_rots_s = healpix_verts_rots(
+            self.hl_source, 0.0, 1.0, cells=cells_source
+        )
+        vertsmm_s, vertsmm_rots_s = healpix_verts_rots(
+            self.hl_source, 0.5, 0.5, cells=cells_source
+        )
         self.hpy_verts = [
             verts00_s.to(torch.float32),
             verts10_s.to(torch.float32),
@@ -68,11 +92,21 @@ class Tokenizer:
             vertsmm_rots_s.to(torch.float32),
         ]
 
-        verts00, verts00_rots = healpix_verts_rots(self.hl_target, 0.0, 0.0)
-        verts10, verts10_rots = healpix_verts_rots(self.hl_target, 1.0, 0.0)
-        verts11, verts11_rots = healpix_verts_rots(self.hl_target, 1.0, 1.0)
-        verts01, verts01_rots = healpix_verts_rots(self.hl_target, 0.0, 1.0)
-        vertsmm, vertsmm_rots = healpix_verts_rots(self.hl_target, 0.5, 0.5)
+        verts00, verts00_rots = healpix_verts_rots(
+            self.hl_target, 0.0, 0.0, cells=cells_target
+        )
+        verts10, verts10_rots = healpix_verts_rots(
+            self.hl_target, 1.0, 0.0, cells=cells_target
+        )
+        verts11, verts11_rots = healpix_verts_rots(
+            self.hl_target, 1.0, 1.0, cells=cells_target
+        )
+        verts01, verts01_rots = healpix_verts_rots(
+            self.hl_target, 0.0, 1.0, cells=cells_target
+        )
+        vertsmm, vertsmm_rots = healpix_verts_rots(
+            self.hl_target, 0.5, 0.5, cells=cells_target
+        )
         self.hpy_verts_rots_target = [
             verts00_rots.to(torch.float32),
             verts10_rots.to(torch.float32),
@@ -106,30 +140,22 @@ class Tokenizer:
 
         # add local coords wrt to center of neighboring cells
         # (since the neighbors are used in the prediction)
-        num_healpix_cells = 12 * 4**self.hl_target
+        ids_target = (
+            np.arange(12 * 4**self.hl_target) if cells_target is None else np.asarray(cells_target)
+        )
         with warnings.catch_warnings(action="ignore"):
-            temp = hp.neighbours(
-                np.arange(num_healpix_cells), 2**self.hl_target, order="nested"
-            ).transpose()
+            temp = hp.neighbours(ids_target, 2**self.hl_target, order="nested").transpose()
         # fix missing nbors with references to self
         for i, row in enumerate(temp):
-            temp[i][row == -1] = i
+            temp[i][row == -1] = ids_target[i]
+        # a neighbour of an active cell need not itself be active, so its centre cannot be
+        # gathered from vertsmm (which now holds active cells only) and is computed here
         self.hpy_nctrs_target = (
-            vertsmm[temp.flatten()]
-            .reshape((num_healpix_cells, 8, 3))
+            healpix_verts(self.hl_target, 0.5, 0.5, cells=temp.flatten())
+            .reshape((len(ids_target), 8, 3))
             .transpose(1, 0)
             .to(torch.float32)
         )
-
-        if self.grid_source is not None and not self.grid_source.is_full:
-            a2g = torch.from_numpy(self.grid_source.active_to_global).to(torch.long)
-            self.hpy_verts = [v[a2g] for v in self.hpy_verts]
-            self.hpy_verts_rots_source = [v[a2g] for v in self.hpy_verts_rots_source]
-        if self.grid_target is not None and not self.grid_target.is_full:
-            a2g = torch.from_numpy(self.grid_target.active_to_global).to(torch.long)
-            self.hpy_verts_rots_target = [v[a2g] for v in self.hpy_verts_rots_target]
-            self.hpy_verts_local_target = self.hpy_verts_local_target[a2g]
-            self.hpy_nctrs_target = self.hpy_nctrs_target[:, a2g, :]
 
     def compute_source_centroids(self, source_tokens_cells: list[torch.Tensor]) -> torch.Tensor:
         source_means = [

@@ -47,7 +47,7 @@ class LatentRegridder(torch.nn.Module):
         if self.mode == "reduce":
             shift = 2 * (self.level_src - self.level_dst)
             parent_global = grid_src.active_to_global >> shift
-            src_to_dst = grid_dst.global_to_active[parent_global]
+            src_to_dst = grid_dst.to_active(parent_global)
             counts = np.bincount(
                 src_to_dst[src_to_dst >= 0], minlength=self.num_dst
             ).astype(np.float32)
@@ -62,7 +62,7 @@ class LatentRegridder(torch.nn.Module):
             shift = 2 * (self.level_dst - self.level_src)
             ancestor_global = grid_dst.active_to_global >> shift
             # (num_cells_dst,), -1 where the ancestor cell is out of region
-            dst_to_src = grid_src.global_to_active[ancestor_global]
+            dst_to_src = grid_src.to_active(ancestor_global)
             self._dst_to_src_np = dst_to_src
             self.register_buffer("dst_to_src", torch.zeros(len(dst_to_src), dtype=torch.long))
 

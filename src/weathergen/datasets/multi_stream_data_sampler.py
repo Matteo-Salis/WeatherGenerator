@@ -23,6 +23,7 @@ from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
+    TimeIndexRange,
     TimeWindowHandler,
     TIndex,
 )
@@ -206,6 +207,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 hl_target=F,
                 grid_source=self.grids[L],
                 grid_target=self.grid_F,
+                decoder_absolute_coords=cf.get("decoder_absolute_coords", False),
             )
             for L in self.encoder_levels
         }
@@ -245,10 +247,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             logger.info(self.time_window_handler)
         self.index_range = tw.get_index_range()
 
+        # readers first: the index range is then narrowed to what they can actually serve
+        self.streams_datasets = self._init_stream_datasets(cf)
+        self._narrow_index_range_to_data()
+
         # check samples per mini epoch
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
         self.check_samples(self._get_fsm())
-        self.streams_datasets = self._init_stream_datasets(cf)
 
         # residual prediction: source-to-target channel map per stream
         residual_mode = residual_prediction_mode(cf)
@@ -285,11 +290,43 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         L = int(stream_info.get("healpix_level", self.healpix_level))
         return self.tokenizers[L]
 
+    def _narrow_index_range_to_data(self) -> None:
+        """
+        Keep only the window indices every stream can serve.
+
+        A window outside a stream's date range reads back empty, and an empty window desyncs
+        FSDP: the stream drops out of this rank's graph alone, so its collectives go missing and
+        the other ranks block until the NCCL watchdog fires. Readers that cannot state an extent
+        return None and constrain nothing (see DataReaderBase.window_index_range).
+        """
+
+        configured = (int(self.index_range.start), int(self.index_range.end))
+        lo, hi = configured
+        for stream in self.streams_datasets.values():
+            for reader in stream.readers:
+                extent = reader.window_index_range()
+                if extent is not None:
+                    lo, hi = max(lo, int(extent.start)), min(hi, int(extent.end))
+
+        assert lo < hi, (
+            f"the streams' date ranges have no window in common (they intersect to [{lo}, {hi})). "
+            "Set start_date/end_date to a range the streams share."
+        )
+
+        if (lo, hi) != configured and is_root():
+            logger.info(
+                f"Sampling window indices [{lo}, {hi}), from "
+                f"{self.time_window_handler.window(lo).start}: the rest lie outside the date "
+                "range of at least one stream."
+            )
+
+        self.index_range = TimeIndexRange(np.int64(lo), np.int64(hi))
+
     def check_samples(self, fsm: int):
         """Check if samples_per_mini_epoch is suitable
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
 
-        max_index = self.index_range.end - (
+        max_index = (self.index_range.end - self.index_range.start) - (
             (  # max time units needed to make a forecast
                 self.time_step * (fsm + self.output_offset)  # translation due to forecasting
                 + self.len_timedelta  # length of forecasting window
@@ -344,10 +381,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _calc_baseperms(self, fsm: int) -> np.typing.NDArray:
         """This calculates the base permutation array and
         depends on fsm so must be repeated for __init__ and reset"""
-        perms_len = int(self.index_range.end - self.index_range.start)
-        perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
+        # index_range is what every stream can serve, so the lookback is measured from its start
+        first = int(self.index_range.start) + int(self.max_input_steps)
+        last = int(self.index_range.end)
+        last -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
 
-        return np.arange(self.max_input_steps, perms_len)
+        return np.arange(first, last)
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
         """Load dataset readers for all streams from config."""
@@ -730,13 +769,23 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         return stream_data
 
     def _get_data_windows(
-        self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds, with_row_idxs=False
+        self,
+        base_idx,
+        num_forecast_steps,
+        num_steps_input_max,
+        stream_ds,
+        stream_info,
+        with_row_idxs=False,
     ):
         """
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
 
         """
+    
+        L = int(stream_info.get("healpix_level", self.healpix_level))
+        grid_source = self.grids[L]
+        grid_target = self.grid_F
 
         # source data: iterate overall input steps
         input_data = []
@@ -750,10 +799,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(idx)
                 rdata = spoof(
-                    self.healpix_level,
+                    L,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].source_idx]),
+                    cells=grid_source.active_to_global,
                 )
                 rdata.is_spoof = True
 
@@ -774,10 +824,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(step_forecast_dt)
                 rdata = spoof(
-                    self.healpix_level,
+                    self.fe_healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
                     len(stream_ds[0].mean[stream_ds[0].target_idx]),
+                    cells=grid_target.active_to_global,
                 )
                 rdata.is_spoof = True
 
@@ -879,7 +930,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             res_col_map = self._residual_col_maps.get(stream_name)
             res_grid_shape = self._grid_shapes.get(stream_name)
             (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_ds, with_row_idxs=res_col_map is not None
+                idx,
+                num_forecast_steps,
+                i_max,
+                stream_ds,
+                stream_info,
+                with_row_idxs=res_col_map is not None,
             )
 
             # tokenize windows

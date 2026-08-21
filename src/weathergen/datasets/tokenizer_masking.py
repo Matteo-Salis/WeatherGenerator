@@ -14,6 +14,7 @@ import torch
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.datasets.masking import Masker
+from weathergen.datasets.stream_data import spoof
 from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
     encode_times_source,
@@ -40,6 +41,13 @@ def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
     return rdata
 
 
+def num_tokens(idxs_cells_lens) -> int:
+    """
+    Total number of tokens across cells of a (possibly active-restricted) tokenization.
+    """
+    return sum(len(lens) for lens in idxs_cells_lens)
+
+
 class TokenizerMasking(Tokenizer):
     def __init__(
         self,
@@ -48,8 +56,10 @@ class TokenizerMasking(Tokenizer):
         hl_target: int = None,
         grid_source=None,
         grid_target=None,
+        decoder_absolute_coords: bool = False,
     ):
         super().__init__(hl_source, hl_target, grid_source, grid_target)
+        self.decoder_absolute_coords = decoder_absolute_coords
         self.masker = masker
         self.rng = None
         self.token_size = None
@@ -78,13 +88,14 @@ class TokenizerMasking(Tokenizer):
         )
         token_size = stream_info["token_size"]
 
-        # active cell ids 
+        # active cell ids; for a full-globe grid this is arange(12 * 4**hl), so restricting
+        # below reproduces the un-restricted per-cell sequence exactly
         active_to_global = grid.active_to_global if grid is not None else np.arange(12 * 4**hl)
-        # fast path: full globe is exactly the previous behaviour
+        # full globe cannot restrict to nothing, so it never needs the spoof below
         passthrough = grid is None or grid.is_full
 
         tokens = []
-        for rdata in data:
+        for i, rdata in enumerate(data):
             # skip empty data
             if rdata.is_empty():
                 tokens += [(None, None)]
@@ -93,10 +104,28 @@ class TokenizerMasking(Tokenizer):
             idxs_cells, idxs_cells_lens = tok(
                 readerdata_to_torch(rdata), token_size, hl, pad_tokens
             )
+            # the tokenizers return sparse per-cell maps; this is where they become the
+            # per-cell sequence (in active order) that the masking below indexes positionally
+            idxs_cells, idxs_cells_lens = restrict_to_active(
+                idxs_cells, idxs_cells_lens, active_to_global
+            )
             if not passthrough:
-                idxs_cells, idxs_cells_lens = restrict_to_active(
-                    idxs_cells, idxs_cells_lens, active_to_global
-                )
+                if num_tokens(idxs_cells_lens) == 0 and not rdata.is_spoof:
+                    rdata = spoof(
+                        hl,
+                        rdata.datetimes[0],
+                        rdata.geoinfos.shape[1],
+                        rdata.data.shape[1],
+                        cells=active_to_global,
+                    )
+                    rdata.is_spoof = True
+                    data[i] = rdata
+                    idxs_cells, idxs_cells_lens = tok(
+                        readerdata_to_torch(rdata), token_size, hl, pad_tokens
+                    )
+                    idxs_cells, idxs_cells_lens = restrict_to_active(
+                        idxs_cells, idxs_cells_lens, active_to_global
+                    )
             tokens += [(idxs_cells, idxs_cells_lens)]
 
         return tokens
@@ -204,6 +233,7 @@ class TokenizerMasking(Tokenizer):
             self.hpy_verts_local_target,
             self.hpy_nctrs_target,
             encode_times_target,
+            self.decoder_absolute_coords,
         )
 
         return (coords_local, coords_per_cell, idxs_data)

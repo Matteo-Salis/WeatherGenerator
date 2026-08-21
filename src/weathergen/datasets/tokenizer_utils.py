@@ -125,8 +125,11 @@ def hpy_splits(
        tokens can be padded
 
     Return :
-        idxs_ord : flat list of indices (to data points) per healpix cell
-        idxs_ord_lens : lens of lists per cell
+        idxs_ord : dict {global cell id -> list of index tensors}, holding only *occupied*
+            cells; unoccupied cells are absent rather than mapped to an empty list, so the
+            cost is O(occupied) instead of O(12 * 4**hl). ``restrict_to_active`` turns this
+            into the per-cell sequence the rest of the pipeline consumes.
+        idxs_ord_lens : dict {global cell id -> lens of the lists in idxs_ord}
         (so that data[idxs_ord].split( idxs_ord_lens) provides per cell data)
     """
 
@@ -135,8 +138,8 @@ def hpy_splits(
     # pad to token size *and* offset by +1 to account for the index 0 that is added for the padding
     offset = (1 if pad_tokens else 0) + offset_step
 
-    idxs_ord = [[] for _ in range(12 * 4**hl)]
-    idxs_ord_lens = [[] for _ in range(12 * 4**hl)]
+    idxs_ord = {}
+    idxs_ord_lens = {}
     for cell, idxs in zip(occupied, cell_idxs, strict=True):
         # if token_size is exceeded split based on latitude
         # TODO: split by hierarchically traversing healpix scheme
@@ -145,8 +148,8 @@ def hpy_splits(
         rem = -len(idxs) % token_size if pad_tokens else 0
         tokens = torch.cat((torch.from_numpy(by_lat + offset), torch.zeros(rem, dtype=torch.int32)))
 
-        idxs_ord[cell] = list(torch.split(tokens, token_size))
-        idxs_ord_lens[cell] = [len(t) for t in idxs_ord[cell]]
+        idxs_ord[int(cell)] = list(torch.split(tokens, token_size))
+        idxs_ord_lens[int(cell)] = [len(t) for t in idxs_ord[int(cell)]]
 
     return idxs_ord, idxs_ord_lens
 
@@ -180,12 +183,10 @@ def tokenize_spacetime(
     if len(t_unique) == 1:
         return tokenize_space(rdata, token_size, hl, pad_tokens)
 
-    num_healpix_cells = 12 * 4**hl
-    idxs_cells = [[] for _ in range(num_healpix_cells)]
-    idxs_cells_lens = [[] for _ in range(num_healpix_cells)]
-
-    # only cells holding data in some time step can receive tokens below
-    occupied = np.unique(ang2pix(2**hl, *theta_phi_to_standard_coords(rdata.coords), nest=True))
+    # sparse per-cell maps, keyed by global cell id; only cells holding data appear, so the
+    # union over time steps falls out of the per-step keys and needs no separate census
+    idxs_cells = {}
+    idxs_cells_lens = {}
 
     offset_step = 0
     for t in t_unique:
@@ -197,21 +198,24 @@ def tokenize_spacetime(
         idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens, offset_step)
 
         # collect data for all time steps
-        for cell in occupied:
-            idxs_cells[cell] += idxs_cur[cell]
-            idxs_cells_lens[cell] += idxs_cur_lens[cell]
+        for cell, cell_idxs in idxs_cur.items():
+            idxs_cells.setdefault(cell, []).extend(cell_idxs)
+            idxs_cells_lens.setdefault(cell, []).extend(idxs_cur_lens[cell])
         offset_step += mask.sum()
 
     return idxs_cells, idxs_cells_lens
 
 
 def restrict_to_active(idxs_cells, idxs_cells_lens, active_to_global):
-    """Select the active cells (in active-index order) from a full per-cell tokenization.
-    Each stream is tokenized on its encoder's own grid
+    """Materialise the sparse per-cell tokenization as a sequence over the active cells.
+
+    ``idxs_cells``/``idxs_cells_lens`` are the dicts returned by the tokenizers, holding only
+    occupied cells; cells absent from them contribute an empty list. Each stream is tokenized
+    on its encoder's own grid, so this is also where the global cell ids become active indices.
     """
     return (
-        [idxs_cells[g] for g in active_to_global],
-        [idxs_cells_lens[g] for g in active_to_global],
+        [idxs_cells.get(int(g), []) for g in active_to_global],
+        [idxs_cells_lens.get(int(g), []) for g in active_to_global],
     )
 
 
@@ -315,6 +319,7 @@ def tokenize_apply_mask_target(
     hpy_verts_local,
     hpy_nctrs,
     enc_time,
+    decoder_absolute_coords: bool = False,
 ):
     """
     Apply masking to the data.
@@ -381,6 +386,7 @@ def tokenize_apply_mask_target(
             hpy_verts_rots,
             hpy_verts_local,
             hpy_nctrs,
+            decoder_absolute_coords,
         )
         coords_local.requires_grad = False
     else:
@@ -423,9 +429,14 @@ def get_target_coords_local(
     verts_rots,
     verts_local,
     nctrs,
+    decoder_absolute_coords: bool = False,
 ):
     """Generate local coordinates for target coords w.r.t healpix cell vertices and
     and for healpix cell vertices themselves
+
+    With ``decoder_absolute_coords`` the sin/cos of the target's absolute lat/lon replace four
+    slots of the neighbour-centre block, giving the decoder an absolute position alongside the
+    purely relative conditioning it otherwise gets.
     """
 
     # target_coords_lens = [len(t) for t in target_coords]
@@ -515,5 +526,11 @@ def get_target_coords_local(
     # remaining geoinfos (zenith angle etc)
     zi = 99
     a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
+
+    if decoder_absolute_coords:
+        a[..., 98] = np.sin(coords[:, 0])
+        a[..., 97] = np.cos(coords[:, 0])
+        a[..., 96] = np.sin(coords[:, 1])
+        a[..., 95] = np.cos(coords[:, 1])
 
     return a

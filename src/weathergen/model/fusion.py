@@ -32,6 +32,42 @@ def _sum_tensors(xs: list[torch.Tensor]) -> torch.Tensor:
     return out
 
 
+class BranchNorm(torch.nn.Module):
+    """Per-branch LayerNorm on a regridded latent, keeping uncovered cells at exactly zero.
+
+    ``LatentRegridder`` writes zeros for the forecast-grid cells a branch does not reach, and the
+    additive fusion modes read a zero cell as "this branch has nothing to say here". LayerNorm maps
+    an all-zero cell onto its own bias, so those cells are re-zeroed after the norm. Aux tokens
+    carry no cell identity and are normed as they are.
+    """
+
+    name: "BranchNorm"
+
+    def __init__(self, cf: Config, coverage: NDArray) -> None:
+        """
+        Initialize the BranchNorm with the configuration.
+
+        :param cf: Configuration object containing parameters for the engine.
+        :param coverage: (num_cells,) bool, whether this branch feeds each forecast-grid cell.
+        """
+        super(BranchNorm, self).__init__()
+        self.norm = torch.nn.LayerNorm(cf.ae_global_dim_embed, eps=float(cf.norm_eps))
+        self.full_coverage = bool(coverage.all())
+        if not self.full_coverage:
+            self._uncovered_np = ~coverage
+            self.register_buffer("uncovered", torch.zeros(len(coverage), dtype=torch.bool))
+
+    def reset_parameters(self) -> None:
+        if not self.full_coverage:
+            self.uncovered.data.copy_(torch.from_numpy(self._uncovered_np))
+
+    def forward(self, cells: torch.Tensor, aux: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        cells = self.norm(cells)
+        if not self.full_coverage:
+            cells = cells.masked_fill(self.uncovered.view(1, -1, 1, 1), 0.0)
+        return cells, self.norm(aux)
+
+
 class SumFusion(torch.nn.Module):
     """Additive fusion: elementwise sum of the per-encoder regridded latents."""
 

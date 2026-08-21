@@ -244,9 +244,10 @@ class EncoderModule(torch.nn.Module):
         dim_embed = cf.ae_global_dim_embed
 
         if self.rope_mode != "none":
-            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
-            # restrict to active cells
-            verts = verts[self.grid.active_to_global_tensor(verts.device)]
+            # active cells only; the full-globe centres alone are 4.8 GB at level 12
+            verts, _ = healpix_verts_rots(
+                self.healpix_level, 0.5, 0.5, cells=self.grid.active_to_global
+            )
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
             self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
@@ -300,8 +301,9 @@ class EncoderModule(torch.nn.Module):
             # straddles the wrap stays continuous. Recomputed here (not reused from the RoPE
             # block above) because pe_global is initialised unconditionally while that block
             # only runs when rope_mode != "none".
-            pe_verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
-            pe_verts = pe_verts[self.grid.active_to_global_tensor(pe_verts.device)]
+            pe_verts, _ = healpix_verts_rots(
+                self.healpix_level, 0.5, 0.5, cells=self.grid.active_to_global
+            )
             pe_coords = r3tos2(pe_verts.to(self.pe_global.device)).to(torch.float32)
             pe_lat = pe_coords[:, 0]
             pe_lon = torch.remainder(pe_coords[:, 1], 2 * torch.pi)

@@ -29,7 +29,7 @@ from weathergen.model.attention import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
-from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
+from weathergen.model.utils import apply_fct_to_blocks, freeze_weights, reset_leaf_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.performance import register_nvtx_hooks
 from weathergen.utils.utils import get_dtype
@@ -165,9 +165,9 @@ def init_model_and_shard(
         model = load_model(cf, model, device, run_id, mini_epoch)
     else:
         if with_ddp and with_fsdp:
+            # the model was built on the meta device: materialise the storage, then fill it
             model.to_empty(device="cuda")
-            if with_fsdp:
-                model.reset_parameters()
+            model.reset_parameters()
 
     # model params
     model_params = ModelParams(cf).create(cf)
@@ -175,6 +175,74 @@ def init_model_and_shard(
     model_params = model_params.to(f"cuda:{cf.local_rank}")
 
     return model, model_params
+
+
+def _geometry_buffers_to_rebuild(model, params) -> set[str]:
+    """Checkpoint entries whose shape no longer matches the model.
+
+    Grid geometry -- regrid index tables, HEALPix neighbourhoods, positional encodings -- is sized
+    by the configured grids, so changing a level or an active region legitimately resizes it. Those
+    buffers are dropped here and rebuilt from the current grid by their owner's reset_parameters;
+    anything else is a learned weight, and rebuilding it would silently discard training.
+    """
+
+    model_sd = model.state_dict()
+    buffer_names = {name for name, _ in model.named_buffers()}
+    modules = dict(model.named_modules())
+
+    stale = set()
+    for param_name, full_tensor in params.items():
+        model_tensor = model_sd.get(param_name)
+        if model_tensor is None or model_tensor.shape == full_tensor.shape:
+            continue
+
+        parent = param_name.rsplit(".", 1)[0]
+        parent_module = modules.get(parent)
+        parent_has_params = parent_module is not None and any(
+            True for _ in parent_module.parameters()
+        )
+        assert param_name in buffer_names and not parent_has_params, (
+            f"Shape mismatch for {param_name}: checkpoint has {tuple(full_tensor.shape)}, "
+            f"model expects {tuple(model_tensor.shape)}. Rebuilding it would "
+            f"re-initialise '{parent}' and discard its learned weights; make the "
+            "config's grid geometry match the checkpoint instead."
+        )
+        logger.warning(
+            f"Rebuilding geometry buffer {param_name} from the current grid: checkpoint "
+            f"{tuple(full_tensor.shape)}, model {tuple(model_tensor.shape)}."
+        )
+        stale.add(param_name)
+
+    return stale
+
+
+def _reinit_missing_modules(model, missing_keys, to_empty: bool) -> None:
+    """Initialize the modules owning ``missing_keys``.
+
+    These are new network parts (e.g. for fine-tuning) plus the geometry buffers dropped by
+    _geometry_buffers_to_rebuild.
+    """
+
+    if not missing_keys:
+        return
+
+    # keep the highest-level roots only, so a subtree is initialized once
+    roots = set()
+    for path in sorted({key.rsplit(".", 1)[0] for key in missing_keys}):
+        if not any(path.startswith(root + ".") for root in roots):
+            roots.add(path)
+
+    all_modules = dict(model.named_modules())
+    for path in sorted(roots):
+        if is_root():
+            logger.info(f"Initializing module not found in checkpoint: {path}")
+        module = all_modules[path]
+        if to_empty:
+            module.to_empty(device="cuda")
+            reset_leaf_parameters(module)
+            module.reset_parameters()
+        elif hasattr(module, "reset_parameters"):
+            module.reset_parameters()
 
 
 def load_model(cf, model, device, run_id: str, mini_epoch=-1):
@@ -197,29 +265,14 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     is_model_sharded = cf.with_ddp and cf.with_fsdp
     if is_model_sharded:
         meta_sharded_sd = model.state_dict()
-        model_buffer_names = {name for name, _ in model.named_buffers()}
+        stale_buffers = _geometry_buffers_to_rebuild(model, params)
         maybe_sharded_sd = {}
         for param_name, full_tensor in params.items():
             sharded_meta_param = meta_sharded_sd.get(param_name)
             if sharded_meta_param is None:
                 logger.warning(f"Parameter {param_name} from checkpoint not found in model.")
                 continue
-            if sharded_meta_param.shape != full_tensor.shape:
-                parent = param_name.rsplit(".", 1)[0]
-                parent_module = dict(model.named_modules()).get(parent)
-                parent_has_params = parent_module is not None and any(
-                    True for _ in parent_module.parameters()
-                )
-                assert param_name in model_buffer_names and not parent_has_params, (
-                    f"Shape mismatch for {param_name}: checkpoint has {tuple(full_tensor.shape)}, "
-                    f"model expects {tuple(sharded_meta_param.shape)}. Rebuilding it would "
-                    f"re-initialise '{parent}' and discard its learned weights; make the "
-                    "config's grid geometry match the checkpoint instead."
-                )
-                logger.warning(
-                    f"Rebuilding geometry buffer {param_name} from the current grid: checkpoint "
-                    f"{tuple(full_tensor.shape)}, model {tuple(sharded_meta_param.shape)}."
-                )
+            if param_name in stale_buffers:
                 continue
             if isinstance(sharded_meta_param, DTensor):
                 sharded_tensor = distribute_tensor(
@@ -233,25 +286,8 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
         mkeys, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
 
-        # new network parts (e.g. for fine-tuning)
-        if mkeys:
-            # Get the unique parent modules for the missing parameters
-            new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
-
-            # Find the highest-level "root" new modules to avoid redundant initializations
-            root_new_modules = set()
-            for path in sorted(list(new_modules_to_init)):
-                if not any(path.startswith(root + ".") for root in root_new_modules):
-                    root_new_modules.add(path)
-
-            # Get all modules for quick lookup and initialize the new ones
-            all_modules = dict(model.named_modules())
-            for path in root_new_modules:
-                if is_root():
-                    logger.info(f"Initializing new module not found in checkpoint: {path}")
-                module_to_init = all_modules[path]
-                module_to_init.to_empty(device="cuda")
-                module_to_init.reset_parameters()
+        # new network parts (e.g. for fine-tuning) and the geometry buffers dropped above
+        _reinit_missing_modules(model, mkeys, to_empty=True)
 
     else:
         # fix mismatch between state_dict keys that can occur between interactive/non-interactive
@@ -269,9 +305,13 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
             for k in params.keys():
                 params_temp[k.replace("module.", "")] = params[k]
             params = params_temp
+        stale_buffers = _geometry_buffers_to_rebuild(model, params)
+        params = {k: v for k, v in params.items() if k not in stale_buffers}
         # load checkpoint
         mkeys, ukeys = model.load_state_dict(params, strict=False)
         model = model.to(device)
+
+        _reinit_missing_modules(model, mkeys, to_empty=False)
 
     # warn about difference in checkpoint and model
     if len(mkeys) == 0 and len(ukeys) == 0:

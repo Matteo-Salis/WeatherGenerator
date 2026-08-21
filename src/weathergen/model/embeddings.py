@@ -18,6 +18,9 @@ from weathergen.model.norms import RMSNorm
 from weathergen.model.positional_encoding import positional_encoding_harmonic
 
 
+_MAX_TOKENS_PER_EMBED_CALL = 32768
+
+
 class StreamEmbedTransformer(torch.nn.Module):
     def __init__(
         self,
@@ -101,6 +104,14 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.dropout_final = torch.nn.Dropout(0.1)
 
     def forward(self, x_in):
+        if x_in.shape[0] <= _MAX_TOKENS_PER_EMBED_CALL:
+            return self._embed_tokens(x_in)
+
+        return torch.cat(
+            [self._embed_tokens(c) for c in x_in.split(_MAX_TOKENS_PER_EMBED_CALL, dim=0)]
+        )
+
+    def _embed_tokens(self, x_in):
         peh = positional_encoding_harmonic
 
         # embed provided input data

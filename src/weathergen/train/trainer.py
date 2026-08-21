@@ -16,6 +16,7 @@ from math import sqrt
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import tqdm
 from omegaconf import OmegaConf
 
@@ -56,6 +57,23 @@ from weathergen.utils.validation_io import write_output
 logger = logging.getLogger(__name__)
 
 # cfg_keys_to_filter = ["losses", "model_input", "target_input"]
+
+
+def _has_sources(samples, stream_name: str) -> bool:
+    """Whether any sample holds source tokens for a stream."""
+    return any(
+        (sd := s.streams_data.get(stream_name)) is not None
+        and any(t is not None and t.numel() > 0 for t in sd.source_tokens_cells)
+        for s in samples
+    )
+
+
+def _has_targets(samples, stream_name: str, step: int) -> bool:
+    """Whether any sample holds target coords for a stream at an output step."""
+    return any(
+        (sd := s.streams_data.get(stream_name)) is not None and len(sd.target_coords[step]) > 0
+        for s in samples
+    )
 
 
 class Trainer(TrainerBase):
@@ -431,6 +449,44 @@ class Trainer(TrainerBase):
             else:
                 assert False, "validate_before_training must be integer or boolean."
 
+    def _check_uniform_occupancy(self, batch) -> None:
+        """Fail fast when ranks disagree on which (stream, step) slots hold data.
+        """
+        if not dist.is_initialized() or dist.get_world_size() < 2:
+            return
+
+        src, tgt = batch.source_samples.samples, batch.target_samples.samples
+
+        flags, labels = [], []
+        for name in self.cf.streams.keys():
+            flags.append(_has_sources(src, name))
+            labels.append(f"{name}/source")
+            for step in batch.output_idxs:
+                flags.append(_has_targets(src, name, step))
+                labels.append(f"{name}/decode[{step}]")
+                flags.append(_has_targets(tgt, name, step))
+                labels.append(f"{name}/loss[{step}]")
+
+        local = torch.tensor(flags, dtype=torch.uint8, device=self.device)
+        world = dist.get_world_size()
+        # gloo only accepts a flat output buffer here, so gather flat and reshape
+        gathered = torch.empty(world * local.numel(), dtype=torch.uint8, device=self.device)
+        dist.all_gather_into_tensor(gathered, local)
+        gathered = gathered.view(world, local.numel())
+
+        differs = gathered != gathered[0]
+        if not bool(differs.any()):
+            return
+
+        detail = "; ".join(
+            f"{labels[j]} " + " ".join(f"r{r}={int(gathered[r, j])}" for r in range(world))
+            for j in differs.any(dim=0).nonzero().flatten().tolist()
+        )
+        raise RuntimeError(
+            "ranks disagree on which (stream, step) slots hold data, so they would run "
+            f"different modules and desync FSDP: {detail}"
+        )
+
     def train(self, mini_epoch):
         """
         Perform training for one epoch
@@ -454,6 +510,7 @@ class Trainer(TrainerBase):
                     batch = batch.pin_memory()
 
                 batch.to_device(self.device)
+                self._check_uniform_occupancy(batch)
 
                 with torch.autocast(
                     device_type=f"cuda:{cf.local_rank}",
@@ -589,6 +646,7 @@ class Trainer(TrainerBase):
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     batch.to_device(self.device)
+                    self._check_uniform_occupancy(batch)
 
                     # evaluate model
                     with torch.autocast(

@@ -10,6 +10,7 @@
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
+from typing import override
 
 import numpy as np
 from numpy import datetime64, timedelta64
@@ -375,6 +376,16 @@ class DataReaderBase(metaclass=ABCMeta):
         """
 
         return self.length()
+
+    def window_index_range(self) -> TimeIndexRange | None:
+        """
+        Window indices this reader can serve, as a half-open [start, end); None = no constraint.
+
+        Sparse readers keep None: a contiguous extent would not mean every window inside it
+        holds data, so narrowing to it would cost training range and guarantee nothing.
+        """
+
+        return None
 
     def get_source(self, idx: TIndex) -> ReaderData:
         """
@@ -756,6 +767,15 @@ class DataReaderTimestep(DataReaderBase):
             self.time_window_handler,
         )
 
+    @override
+    def window_index_range(self) -> TimeIndexRange | None:
+        return get_window_index_range_timestep(
+            self.data_start_time,
+            self.data_end_time,
+            self.period,
+            self.time_window_handler,
+        )
+
 
 # to avoid rounding issues
 # The basic time precision is 1 millisecond.
@@ -824,3 +844,28 @@ def get_dataset_indexes_timestep(
     end_didx = start_didx + int((dtr.end - dtr.start - t_epsilon) / period)
 
     return (np.arange(start_didx, end_didx + 1, dtype=np.int64), dtr)
+
+
+def get_window_index_range_timestep(
+    data_start_time: NPDT64 | None,
+    data_end_time: NPDT64 | None,
+    period: NPTDel64 | None,
+    tw_handler: TimeWindowHandler,
+) -> TimeIndexRange | None:
+    """
+    Window indices a periodic dataset can serve, as a half-open [start, end); None if unbounded.
+
+    ``get_dataset_indexes_timestep`` returns data only for windows lying wholly inside
+    [data_start_time, data_end_time], so the servable indices are one contiguous run.
+    """
+
+    if not data_start_time or not data_end_time or period is None:
+        return None
+
+    step = tw_handler.t_window_step
+    # first window starting inside the data (ceil), last one ending inside it (floor); the
+    # negation gives ceil, since numpy's timedelta // rounds towards minus infinity
+    first = -((tw_handler.t_start - data_start_time) // step)
+    last = (data_end_time - tw_handler.t_window_len - tw_handler.t_start) // step
+
+    return TimeIndexRange(np.int64(max(int(first), 0)), np.int64(int(last) + 1))

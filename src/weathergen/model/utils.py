@@ -29,6 +29,22 @@ def freeze_weights(block):
         p.requires_grad = False
 
 
+def reset_leaf_parameters(module):
+    """
+    Re-initialize every standard leaf (Linear / LayerNorm) below a module.
+
+    Modules here implement reset_parameters as their *special-case* pass only -- buffers,
+    zero-inits, learned queries -- and assume this generic pass has already run. Anything that
+    re-initializes a subtree has to run both, in this order.
+    """
+
+    def _reset(m):
+        if isinstance(m, nn.Linear | nn.LayerNorm):
+            m.reset_parameters()
+
+    module.apply(_reset)
+
+
 def set_to_eval(block):
     if hasattr(block, "name"):
         logger.info(f"Set block {block.name} to eval mode")

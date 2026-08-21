@@ -157,32 +157,36 @@ def locs_to_ctr_coords(ctrs_r3, locs: list[torch.Tensor]) -> list:
 
 
 ####################################################################################################
-def healpix_verts(hl: int, dx=0.5, dy=0.5):
+def healpix_verts(hl: int, dx=0.5, dy=0.5, cells=None):
     """
     healpix cell center
+
+    ``cells`` restricts the computation to the given global nested cell ids. Building the
+    full globe and subsetting afterwards costs O(12 * 4**hl) no matter how small the active
+    region is, which is what put level 12 out of host memory.
     """
 
     # centroids of healpix cells
-    num_healpix_cells = 12 * 4**hl
-    lons, lats = hp.healpix_to_lonlat(
-        np.arange(0, num_healpix_cells), 2**hl, dx=dx, dy=dy, order="nested"
-    )
+    ids = np.arange(0, 12 * 4**hl) if cells is None else np.asarray(cells)
+    lons, lats = hp.healpix_to_lonlat(ids, 2**hl, dx=dx, dy=dy, order="nested")
     verts = s2tor3(torch.from_numpy(np.pi / 2.0 - lats.value), torch.from_numpy(lons.value))
 
     return verts
 
 
 ####################################################################################################
-def healpix_verts_rots(hl: int, dx=0.5, dy=0.5):
+def healpix_verts_rots(hl: int, dx=0.5, dy=0.5, cells=None):
     """
     healpix cell center
+
+    ``cells`` restricts the computation to the given global nested cell ids. Building the
+    full globe and subsetting afterwards costs O(12 * 4**hl) no matter how small the active
+    region is, which is what put level 12 out of host memory.
     """
 
     # centroids of healpix cells
-    num_healpix_cells = 12 * 4**hl
-    lons, lats = hp.healpix_to_lonlat(
-        np.arange(0, num_healpix_cells), 2**hl, dx=dx, dy=dy, order="nested"
-    )
+    ids = np.arange(0, 12 * 4**hl) if cells is None else np.asarray(cells)
+    lons, lats = hp.healpix_to_lonlat(ids, 2**hl, dx=dx, dy=dy, order="nested")
     verts = s2tor3(torch.from_numpy(np.pi / 2.0 - lats.value), torch.from_numpy(lons.value))
     verts_rot3 = vecs_to_rots(verts)
 

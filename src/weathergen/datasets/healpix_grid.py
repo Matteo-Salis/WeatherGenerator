@@ -231,9 +231,13 @@ class NativeGrid:
     is_full : bool
         Whether the grid covers the whole globe (no active region).
     active_to_global : np.ndarray[int64], shape (num_cells,)
-        Active index -> global nested cell id.
-    global_to_active : np.ndarray[int64], shape (num_global,)
-        Global nested cell id -> active index, ``-1`` for inactive cells.
+        Active index -> global nested cell id, sorted ascending.
+
+    The inverse mapping is ``to_active()``, a binary search over ``active_to_global``
+    rather than a dense ``num_global`` lookup table. The table costs O(num_global)
+    regardless of how little of the globe is active -- 1.6 GB per grid at level 12
+    against 3.7 MB for the active list -- and is built in every rank *and* every
+    dataloader worker, which is what put level 12 out of host memory.
     """
 
     def __init__(self, cf, level: int | None = None, region=None) -> None:
@@ -253,10 +257,6 @@ class NativeGrid:
         self.num_cells = int(self.active_to_global.shape[0])
         self.is_full = self.num_cells == self.num_global
 
-        g2a = np.full(self.num_global, -1, dtype=np.int64)
-        g2a[self.active_to_global] = np.arange(self.num_cells, dtype=np.int64)
-        self.global_to_active = g2a
-
     @property
     def nside(self) -> int:
         return 2**self.level
@@ -264,8 +264,30 @@ class NativeGrid:
     def active_to_global_tensor(self, device=None) -> torch.Tensor:
         return torch.from_numpy(self.active_to_global).to(device=device, dtype=torch.long)
 
+    def to_active(self, global_ids: NDArray) -> NDArray:
+        """Global nested cell ids -> active indices, ``-1`` where the cell is not active.
+
+        Shape-preserving. Ids of ``-1`` (a missing pole neighbour) map to ``-1`` as well,
+        since no cell id ever matches them.
+        """
+        ids = np.asarray(global_ids)
+        if self.is_full:
+            # active index == global id, so the search would be an identity map
+            return ids.astype(np.int64, copy=False)
+        pos = np.searchsorted(self.active_to_global, ids)
+        # clip only to keep the gather in bounds; the equality test rejects the misses
+        pos = np.clip(pos, 0, max(self.num_cells - 1, 0))
+        return np.where(self.active_to_global[pos] == ids, pos, -1).astype(np.int64, copy=False)
+
     def global_to_active_tensor(self, device=None) -> torch.Tensor:
-        return torch.from_numpy(self.global_to_active).to(device=device, dtype=torch.long)
+        """Dense global -> active table, built on demand.
+
+        Materialises ``num_global`` entries, so prefer ``to_active()`` unless a full-globe
+        scatter is genuinely needed.
+        """
+        g2a = np.full(self.num_global, -1, dtype=np.int64)
+        g2a[self.active_to_global] = np.arange(self.num_cells, dtype=np.int64)
+        return torch.from_numpy(g2a).to(device=device, dtype=torch.long)
 
     def neighbours_self_filled(self) -> torch.Tensor:
         """
@@ -278,7 +300,7 @@ class NativeGrid:
         # map global neighbour ids -> active ids (-1 = missing or inactive)
         temp_active = np.full_like(temp, -1)
         valid = temp != -1
-        temp_active[valid] = self.global_to_active[temp[valid]]
+        temp_active[valid] = self.to_active(temp[valid])
 
         out = np.empty((self.num_cells, temp.shape[1] + 1), dtype=np.int64)
         out[:, 0] = np.arange(self.num_cells, dtype=np.int64)

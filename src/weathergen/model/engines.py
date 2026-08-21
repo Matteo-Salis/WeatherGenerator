@@ -693,9 +693,8 @@ class ForecastingEngine(torch.nn.Module):
                 if self.grid.is_full or self.healpix_level != self.grid.level
                 else self.grid.active_to_global
             )
-            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
-            if cell_ids is not None:
-                verts = verts[torch.as_tensor(cell_ids, device=verts.device, dtype=torch.long)]
+            # cell_ids None means the whole globe, which is what healpix_verts_rots defaults to
+            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5, cells=cell_ids)
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
             self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)

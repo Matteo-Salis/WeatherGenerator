@@ -40,7 +40,7 @@ from weathergen.model.engines import (
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
-from weathergen.model.fusion import create_fusion_module
+from weathergen.model.fusion import BranchNorm, create_fusion_module
 from weathergen.model.latent_regrid import LatentRegridder
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.residual import (
@@ -49,7 +49,7 @@ from weathergen.model.residual import (
     residual_grid_idx,
     residual_prediction_mode,
 )
-from weathergen.model.utils import get_num_parameters
+from weathergen.model.utils import get_num_parameters, reset_leaf_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
 
@@ -276,11 +276,13 @@ class Model(torch.nn.Module):
             self.encoders[str(L)] = enc
             self.regridders[str(L)] = LatentRegridder(enc.grid, self.grid, reduce_op=reduce_op)
             if is_root():
+                regridder = self.regridders[str(L)]
                 region = "global" if enc.grid.is_full else region_label(region_for_level(cf, L))
+                how = regridder.mode
                 logger.info(
                     f"encoder L={L}: {enc.num_healpix_cells}/{enc.grid.num_global} active cells"
                     f" ({region}), streams {list(streams_L.keys())},"
-                    f" regrid to F: {self.regridders[str(L)].mode}"
+                    f" regrid to F: {how}"
                 )
 
         F = forecast_level(cf)
@@ -300,11 +302,9 @@ class Model(torch.nn.Module):
             "encoder; check the streams' healpix_active_region against fe_healpix_active_region"
         )
         if cf.get("encoder_fusion_norm", False):
+            # coverage_masks rows follow self.regridders' insertion order, i.e. sorted levels
             self.fusion_norms = torch.nn.ModuleDict(
-                {
-                    str(L): torch.nn.LayerNorm(cf.ae_global_dim_embed, eps=float(cf.norm_eps))
-                    for L in levels
-                }
+                {str(L): BranchNorm(cf, coverage_masks[i]) for i, L in enumerate(levels)}
             )
         self.fusion = create_fusion_module(cf, coverage_masks)
 
@@ -527,19 +527,11 @@ class Model(torch.nn.Module):
         return self
 
     def reset_parameters(self):
-        def _reset_params(module):
-            if isinstance(module, nn.Linear | nn.LayerNorm):
-                module.reset_parameters()
-            else:
-                pass
-
-        self.apply(_reset_params)
-        if self.encoders is not None:
-            for encoder in self.encoders.values():
-                encoder.reset_parameters()
-        if self.regridders is not None:
-            for regridder in self.regridders.values():
-                regridder.reset_parameters()
+        reset_leaf_parameters(self)
+        for per_level in (self.encoders, self.regridders, self.fusion_norms):
+            if per_level is not None:
+                for module in per_level.values():
+                    module.reset_parameters()
         if self.fusion is not None:
             self.fusion.reset_parameters()
         if self.forecast_engine is not None:
@@ -661,8 +653,7 @@ class Model(torch.nn.Module):
             cells_L = tokens_L[:, num_aux:]
             cells_F = self.regridders[L_str](cells_L)
             if self.fusion_norms is not None:
-                cells_F = self.fusion_norms[L_str](cells_F)
-                aux_L = self.fusion_norms[L_str](aux_L)
+                cells_F, aux_L = self.fusion_norms[L_str](cells_F, aux_L)
             cells_list.append(cells_F)
             aux_list.append(aux_L)
             posteriors = posteriors + (
@@ -815,6 +806,8 @@ class Model(torch.nn.Module):
             t_coords_lens = [len(t) for t in t_coords]
             t_coords = torch.cat(t_coords)
 
+            # ranks must agree on this skip or FSDP desyncs; Trainer._check_uniform_occupancy
+            # fails the step up front when they do not
             if len(t_coords) == 0:
                 continue
 
