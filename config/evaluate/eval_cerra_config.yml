@@ -11,7 +11,7 @@ evaluation:
   summary_plots : true
   ratio_plots : true
   heat_maps : false
-  summary_dir: "./plots/MF_KNMI/eval_plots/CERRA_experiments/structure_loss"
+  summary_dir: "./plots/MF_KNMI/eval_plots/CERRA_experiments/pe_global"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
   plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
   print_summary: false #print out score values on screen. it can be verbose
@@ -40,7 +40,7 @@ default_streams:
       
 run_ids :
 
-  ztzri4vk:
+  vsveu86g:
     #type: "json"
     label: "Alternative pe_global"
     rank: "all"
