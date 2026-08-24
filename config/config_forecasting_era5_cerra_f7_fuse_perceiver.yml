@@ -12,7 +12,7 @@ embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 2048
-ae_local_num_blocks: 0 
+ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -35,6 +35,8 @@ ae_global_with_qk_lnorm: True
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
+# geographic (lat/lon Fourier) pe_global instead of index-based sinusoids
+ae_global_pe_geographic: True
 ae_global_trailing_layer_norm: False
 
 ae_aggregation_num_blocks: 0
@@ -45,7 +47,10 @@ ae_aggregation_att_dense_rate: 1.0
 ae_aggregation_block_factor: 64
 ae_aggregation_mlp_hidden_factor: 2
 
+# sin/cos of absolute target lat/lon substituted into the relative coord block
+decoder_absolute_coords: True
 decoder_type: PerceiverIOCoordConditioning #  Main options PerceiverIOCoordConditioning or Linear
+residual_prediction: none
 pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
@@ -64,22 +69,19 @@ fe_impute_latent_noise_std: 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 
-# Fusion ablation: latent/decode on hp7. ERA5 encoder stays global L5,
-# CERRA encoder stays L7 europe (identity regrid 7->7 onto grid_F).
 fe_healpix_level: 7
 fe_healpix_active_region:
   from_stream: CERRA
-  rings: 1
+  rings: 0
 
 encoder_fusion_mode: perceiver # "sum", "concat_mlp", "perceiver"
-encoder_fusion_norm: True # per-level LayerNorm on each encoder's regridded latent before fusion
+encoder_fusion_norm: False # kept False to match the control; True/False was confounded with mode in gen 1
 encoder_fusion_reduce: avg # "avg", "max", "sum"
-# perceiver: per-cell learnable queries cross-attend into the covering encoders' latents
-# (varlen-masked, so regional encoders never attend outside their active region)
+# perceiver knobs
 encoder_fusion_num_blocks: 2
 encoder_fusion_num_heads: 16
 encoder_fusion_with_qk_lnorm: True
-encoder_fusion_global_num_blocks: 2
+# encoder_fusion_global_num_blocks unset -> code default 2 (fusion.py:261)
 
 rope_2D: False
 
@@ -94,9 +96,9 @@ norm_eps: 1e-4
 
 latent_noise_kl_weight: 0.0 # 1e-5
 latent_noise_gamma: 2.0
-latent_noise_saturate_encodings: 5 
+latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
-latent_noise_deterministic_latents: True 
+latent_noise_deterministic_latents: True
 
 freeze_modules: ""
 load_chkpt: {}
@@ -105,7 +107,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_o96_cerra/"
+streams_directory: "./config/streams/era5_o96_cerra_3h/"
 streams: ???
 
 # type of zarr_store
@@ -118,13 +120,13 @@ general:
   rank: ???
   world_size: ???
 
-  # local_rank, 
+  # local_rank,
   with_ddp: True
-  # data_path_*, 
-  # model_path, 
-  # run_path, 
+  # data_path_*,
+  # model_path,
+  # run_path,
   # path_shared_
-  
+
   multiprocessing_method: "fork"
 
   desc: ""
@@ -147,7 +149,7 @@ data_loading :
 
 # config for training
 training_config:
-  
+
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
@@ -158,9 +160,9 @@ training_config:
   start_date: 1985-01-01T00:00
   end_date: 2022-12-31T00:00
 
-  time_window_step: 06:00:00
-  time_window_len: 06:00:00
-  
+  time_window_step: 03:00:00
+  time_window_len: 03:00:00
+
   learning_rate_scheduling :
     lr_start: 1e-6
     lr_max: 5e-5
@@ -189,7 +191,7 @@ training_config:
         loss_fcts: { "mse": { }, },
         },
     }
-  
+
   model_input: {
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
@@ -198,23 +200,23 @@ training_config:
     }
 
   forecast :
-      time_step: 06:00:00
+      time_step: 03:00:00
       offset: 1
-      num_steps: 3
+      num_steps: 1
       policy: "fixed"
 
 
 # validation config; full validation config is merge of training and validation config
-validation_config: 
+validation_config:
 
   samples_per_mini_epoch: 256
   shuffle: False
 
   start_date: 2023-10-01T00:00
   end_date: 2023-12-31T00:00
-  
+
   # whether to track the exponential moving average of weights for validation
-  validate_with_ema: 
+  validate_with_ema:
     enabled : True
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
@@ -245,11 +247,11 @@ validation_config:
 # - do not use long strings in values (less than 20 characters is a good rule of thumb, we may enforce this in the future)
 wgtags:
   # The name of the organization of the person running the experiment.
-  # This may be autofilled in the future. Expected values are lowercase strings 
+  # This may be autofilled in the future. Expected values are lowercase strings
   # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
   org: "knmi-mf"
   # The Github issue corresponding to this run (number such as 1234)
-  # Github issues are the central point when running experiment and contain 
+  # Github issues are the central point when running experiment and contain
   # links to hedgedocs, code branches, pull requests etc.
   # It is recommended to associate a run with a Github issue.
   issue: null
@@ -257,9 +259,9 @@ wgtags:
   # This is expected to be the primary tag for comparing experiments in MLFlow, along with the
   # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
-  # Examples: "rollout_ablation_grid"  
-  exp: "multihp_f7_fuse_perceiver"
+  # Examples: "rollout_ablation_grid"
+  exp: "fuse_f7_perceiver"
   # *** Experiment-specific tags ***
-  # All extra tags (including lists, dictionaries, etc.) are treated 
+  # All extra tags (including lists, dictionaries, etc.) are treated
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
   grid: null
