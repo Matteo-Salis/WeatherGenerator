@@ -49,6 +49,7 @@ from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
+from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
 
@@ -112,6 +113,9 @@ def run_score_timeseries_pipeline(
         max_workers=reader.eval_cfg.get("max_workers", None),
     )
 
+    needs_clim = needs_climatology(metrics_dict)
+    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
+
     # --- Parallel score computation across (region, fstep) pairs ---
     score_tasks: list[dict] = []
     for fstep in fsteps:
@@ -130,19 +134,39 @@ def run_score_timeseries_pipeline(
         )
         preds_with_hour = preds_fs.assign_coords(source_end_hour=source_end_hour)
         tars_with_hour = tars_fs.assign_coords(source_end_hour=source_end_hour)
+        # get_score groups every DataArray argument, so the climatology is grouped too.
+        clim_with_hour = (
+            aligned_clim_data[fstep].assign_coords(source_end_hour=source_end_hour)
+            if aligned_clim_data
+            else None
+        )
 
         for region in regions:
-            region_metrics = metrics_dict.get(region)
+            # PSD is a spatial metric incompatible with sample+ipoint aggregation
+            region_metrics = dict(metrics_dict.get(region))
+            region_metrics.pop("psd", None)
+            if not region_metrics:
+                continue
+
             metric_names = list(region_metrics.keys())
             metric_params = list(region_metrics.values())
+            # Masked here: the worker only labels its results with `region`.
+            bbox = RegionBoundingBox.from_region_name(region)
+            preds_r = bbox.apply_mask(preds_with_hour)
+            tars_r = bbox.apply_mask(tars_with_hour)
+            if preds_r.sizes.get("ipoint") == 0:
+                continue
             score_tasks.append(
                 dict(
                     fstep=fstep,
                     region=region,
                     metric_names=metric_names,
                     metric_params=metric_params,
-                    preds_with_hour=preds_with_hour,
-                    tars_with_hour=tars_with_hour,
+                    preds_with_hour=preds_r,
+                    tars_with_hour=tars_r,
+                    clim_with_hour=(
+                        bbox.apply_mask(clim_with_hour) if clim_with_hour is not None else None
+                    ),
                     unique_hours=unique_hours,
                 )
             )
@@ -178,6 +202,7 @@ def _compute_timeseries_scores_for_fstep(
     metric_params: list,
     preds_with_hour: xr.DataArray,
     tars_with_hour: xr.DataArray,
+    clim_with_hour: xr.DataArray | None,
     unique_hours: list[int],
 ) -> tuple[int, str, dict[str, xr.DataArray]]:
     """Compute grouped scores for one (region, fstep) pair (parallelisable worker).
@@ -190,7 +215,7 @@ def _compute_timeseries_scores_for_fstep(
     metric_scores: dict[str, xr.DataArray] = {}
     for metric_name, parameters in zip(metric_names, metric_params, strict=False):
         score = get_score(
-            VerifiedData(preds_with_hour, tars_with_hour, None, None, None),
+            VerifiedData(preds_with_hour, tars_with_hour, None, None, clim_with_hour),
             metric_name,
             agg_dims=agg_dims,
             group_by_coord=group_by_coord,
@@ -278,7 +303,7 @@ def run_score_map_pipeline(
         "image_format": cfg.get("image_format", "png"),
         "dpi_val": cfg.get("dpi_val", 300),
         "fig_size": cfg.get("fig_size", None),
-        "animation_format": cfg.get("animation_format", "gif"),
+        "animation_format": cfg.get("animation_format", "mp4"),
         "fps": cfg.get("fps", 2),
     }
     output_basedir = str(reader.runplot_dir)
@@ -504,21 +529,40 @@ def _build_single_animation(
     anim_parts.append(var)
     out_path = f"{output_dir / '_'.join(filter(None, anim_parts))}.{animation_format}"
 
-    if animation_format.lower() == "mp4":
-        frames = [imageio.imread(p) for p in image_paths]
-        fps = 1000 / duration_ms if duration_ms > 0 else 2
-        imageio.mimsave(out_path, frames, fps=fps, ffmpeg_params=["-crf", "18"])
-    else:
-        images = [Image.open(p) for p in image_paths]
-        images[0].save(
+    if animation_format.lower() == "gif":
+        images = [Image.open(p).convert("RGB") for p in image_paths]
+        # GIF frames are palette-indexed (256 colors max) — this is a hard
+        # format limit, so gradients like colorbars can never be truly
+        # continuous here.
+        palette = images[0].quantize(colors=256, method=Image.Quantize.MAXCOVERAGE)
+        frames = [img.quantize(palette=palette, dither=Image.Dither.NONE) for img in images]
+        frames[0].save(
             out_path,
             save_all=True,
-            append_images=images[1:],
+            append_images=frames[1:],
             duration=duration_ms,
             loop=0,
         )
         for img in images:
             img.close()
+    elif animation_format.lower() == "mp4":
+        frames = [imageio.imread(p) for p in image_paths]
+        fps = 1000 / duration_ms if duration_ms > 0 else 2
+        (
+            imageio.mimsave(
+                out_path,
+                frames,
+                fps=fps,
+                macro_block_size=8,
+                ffmpeg_params=["-framerate", str(fps), "-loglevel", "error", "-crf", "18"],
+                ffmpeg_log_level="error",
+            ),
+        )
+    else:
+        raise ValueError(
+            f"Unsupported animation format: {animation_format}. Must be 'gif' or 'mp4'."
+        )
+
     _logger.debug(f"Saved animation to {out_path}")
     return image_paths
 
@@ -847,12 +891,14 @@ def plot_data(
     plot_settings = stream_cfg.get("plotting", {})
 
     plot_keys = ("plot_maps", "plot_histograms", "plot_animations", "plot_timeseries")
-    if not plot_settings or not any(plot_settings.get(k, False) for k in plot_keys):
+    has_old_style = any(plot_settings.get(k, False) for k in plot_keys)
+    has_new_style = bool(plot_settings.get("data_plots"))
+    if not plot_settings or not (has_old_style or has_new_style):
         return
 
     plotter_cfg = {
         "image_format": global_plotting_opts.get("image_format", "png"),
-        "animation_format": global_plotting_opts.get("animation_format", "gif"),
+        "animation_format": global_plotting_opts.get("animation_format", "mp4"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size"),
         "fps": global_plotting_opts.get("fps", 2),
@@ -871,27 +917,16 @@ def plot_data(
         _logger.warning(f"RUN {reader.run_id} - {stream}: No plotting config. Skipping plots.")
         return
 
-    plot_maps = plot_settings.get("plot_maps", False)
-    if not isinstance(plot_maps, bool):
-        raise TypeError("plot_maps must be a boolean.")
-    plot_bias = plot_settings.get("plot_bias", True)
-    if not isinstance(plot_bias, bool):
-        raise TypeError("plot_bias must be a boolean.")
-    plot_target = plot_settings.get("plot_target", True)
-    if not isinstance(plot_target, bool):
-        raise TypeError("plot_target must be a boolean.")
-    plot_timeseries = plot_settings.get("plot_timeseries", False)
-    if not isinstance(plot_timeseries, bool):
-        raise TypeError("plot_timeseries must be a boolean.")
-    plot_histograms = plot_settings.get("plot_histograms", False)
-    if not isinstance(plot_histograms, bool) and plot_histograms not in {
-        "across-samples",
-        "per-sample",
-    }:
-        raise TypeError("plot_histograms must be true, false, 'across-samples', or 'per-sample'. ")
-    plot_animations = plot_settings.get("plot_animations", False)
-    if not isinstance(plot_animations, bool):
-        raise TypeError("plot_animations must be a boolean.")
+    # Resolve plotting flags: prefer new-style data_plots list, fall back to old booleans.
+    data_plots_list = plot_settings.get("data_plots", [])
+
+    _dp = set(data_plots_list)
+    plot_maps = ("maps" in _dp) or plot_settings.get("plot_maps", False)
+    plot_bias = ("bias" in _dp) or plot_settings.get("plot_bias", False)
+    plot_target = ("target" in _dp) or plot_settings.get("plot_target", False)
+    plot_timeseries = ("timeseries" in _dp) or plot_settings.get("plot_timeseries", False)
+    plot_histograms = ("histograms" in _dp) or plot_settings.get("plot_histograms", False)
+    plot_animations = ("animations" in _dp) or plot_settings.get("plot_animations", False)
 
     model_output = output_data
     if output_data is None:
@@ -1247,15 +1282,30 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     br_plotter = BarPlots(plot_cfg, output_basedir)
     quantile_plotter = QuantilePlots(plot_cfg, output_basedir)
 
-    # Map each eval option to whether it's enabled and which subdir(s) it produces,
-    # so the flag is only looked up once and reused for both plotting and PDF merging.
+    # Resolve which summary plots to produce: prefer new-style score_plots list,
+    # fall back to old-style individual booleans.
+    score_plots_list = eval_opt.get("score_plots", [])
+    _sp = set(score_plots_list)
+    do_lead_time = "lead_time" in _sp or "qq_analysis" in _sp
+    do_ratio = "ratio" in _sp or eval_opt.get("ratio_plots", False)
+    do_heatmap = "heatmap" in _sp or eval_opt.get("heat_maps", False)
+    do_scorecard = "scorecard" in _sp or eval_opt.get("score_cards", False)
+    do_bar = "bar" in _sp or eval_opt.get("bar_plots", False)
+
+    # Map each resolved plot option to the subdir(s) it produces, so PDF merging
+    # can reuse the same flags without re-deriving them from eval_opt.
     plot_option_subdirs = {
-        "summary_plots": [PlotSubdir.line_plots, PlotSubdir.psd_plots, PlotSubdir.qq_plots],
-        "ratio_plots": [PlotSubdir.ratio_plots],
-        "score_cards": [PlotSubdir.score_cards],
-        "bar_plots": [PlotSubdir.bar_plots],
+        "lead_time": [PlotSubdir.line_plots, PlotSubdir.psd_plots, PlotSubdir.qq_plots],
+        "ratio": [PlotSubdir.ratio_plots],
+        "scorecard": [PlotSubdir.score_cards],
+        "bar": [PlotSubdir.bar_plots],
     }
-    enabled_opts = {opt: eval_opt.get(opt, False) for opt in plot_option_subdirs}
+    enabled_opts = {
+        "lead_time": do_lead_time,
+        "ratio": do_ratio,
+        "scorecard": do_scorecard,
+        "bar": do_bar,
+    }
 
     for metric in metrics:
         for region in scores_dict[metric].keys():
@@ -1265,20 +1315,24 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
             br_plotter.set_subdir(metric, region)
             quantile_plotter.set_subdir(metric, region)
 
-            if enabled_opts["summary_plots"]:
-                if metric == "psd":
-                    psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
-                elif metric == "qq_analysis":
+            # PSD plots are always produced when psd is in the metrics —
+            # they are intrinsic to the metric, not a separate plot option.
+            if metric == "psd":
+                psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                continue
+
+            if do_lead_time:
+                if metric == "qq_analysis":
                     quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
                 else:
                     plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
-            if enabled_opts["ratio_plots"]:
+            if do_ratio:
                 ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
-            if eval_opt.get("heat_maps", False):
+            if do_heatmap:
                 heat_maps_metric_region(metric, region, runs, scores_dict, plotter)
-            if enabled_opts["score_cards"]:
+            if do_scorecard:
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
-            if enabled_opts["bar_plots"]:
+            if do_bar:
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
 
     # Merge individual PDFs into combined documents for easier browsing
