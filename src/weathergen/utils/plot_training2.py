@@ -1,0 +1,1129 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+import argparse
+import logging
+import pdb
+import subprocess
+import sys
+import traceback
+from pathlib import Path
+
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
+import yaml
+
+import weathergen.common.config as config
+from weathergen.train.utils import TRAIN
+from weathergen.utils.train_logger import Metrics, TrainLogger
+
+_logger = logging.getLogger(__name__)
+
+DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
+MAX_FILENAME_LEN = 255
+LEGEND_FONT_SIZE = "x-small"
+_LEGEND_MAX_LABEL_LEN = 80
+
+
+def _add_legend(
+    labels,
+    ax=None,
+    legend_outside: bool = False,
+    loc=None,
+    bbox_to_anchor=None,
+    **kwargs,
+):
+    """Add a legend below the axes, safely outside the plot and x-axis labels.
+
+    Call this **after** ``tight_layout()`` so that the layout engine does not
+    fight with the legend position.  ``bbox_inches='tight'`` on the subsequent
+    ``savefig`` will expand the canvas to include the legend.
+    """
+    if ax is None:
+        ax = plt.gca()
+
+    truncated = [
+        la if len(la) <= _LEGEND_MAX_LABEL_LEN else la[: _LEGEND_MAX_LABEL_LEN - 1] + "\u2026"
+        for la in labels
+    ]
+    n = len(truncated)
+    ncol = 1 if n <= 3 else (2 if n <= 8 else 3)
+
+    if loc is None:
+        loc = "upper center" if legend_outside else "best"
+    if bbox_to_anchor is None and legend_outside:
+        bbox_to_anchor = (0.5, -0.13)
+
+    legend_kwargs = {
+        "loc": loc,
+        "ncol": ncol,
+        "fontsize": LEGEND_FONT_SIZE,
+        "framealpha": 0.9,
+        "edgecolor": "0.8",
+        "borderaxespad": 0.0,
+        **kwargs,
+    }
+    if bbox_to_anchor is not None:
+        legend_kwargs["bbox_to_anchor"] = bbox_to_anchor
+
+    legend = ax.legend(truncated, **legend_kwargs)
+    for line in legend.get_lines():
+        line.set(alpha=1.0)
+    return legend
+
+
+####################################################################################################
+def _ensure_list(value):
+    """
+    Ensure that the input value is a list. If it is not a list, convert it to a list.
+    Parameters
+    ----------
+    value : any
+        Input value to check.
+    Returns
+    -------
+    list
+        A list containing the input value if it was not a list,
+          or the input value itself if it was already a list.
+    """
+    return value if isinstance(value, list) else [value]
+
+
+####################################################################################################
+def _check_run_id_dict(run_id_dict: dict) -> bool:
+    """
+    Check if the run_id_dict is valid.
+
+    Parameters
+    ----------
+    run_id_dict : dict
+        Dictionary to check.
+    Returns
+    -------
+    """
+    if not isinstance(run_id_dict, dict):
+        return False
+
+    for k, v in run_id_dict.items():
+        if not isinstance(k, str):
+            raise argparse.ArgumentTypeError(f"Each key must be a string, but got: {k}")
+        
+        if not isinstance(v, dict):
+            raise argparse.ArgumentTypeError(
+                f"Each value must be a dictionary with 'job_id' and 'description' keys, "
+                f"optionally with 'color' key, but got: {k}: {v}"
+            )
+        
+        if "job_id" not in v or "description" not in v:
+            raise argparse.ArgumentTypeError(
+                f"Each run must have 'job_id' and 'description' keys. Got: {k}: {v}"
+            )
+
+
+####################################################################################################
+def _read_str_config(yaml_str: str) -> dict:
+    """
+    Read a dictionary-like string to get a configuration dictionary.
+
+    Parameters
+    ----------
+    yaml_str : str
+        Dictionary-like string to read.
+    Returns
+    -------
+    dict
+        The content of the string as a dictionary.
+    """
+    config_dict = yaml.safe_load(yaml_str)
+
+    # Validate the structure
+    _check_run_id_dict(config_dict)
+
+    return config_dict
+
+
+####################################################################################################
+def _read_yaml_config(yaml_file_path):
+    """
+    Read a YAML file to get a configuration dictionary for plotting training diagnostics.
+    Expected structure in the YAML file:
+    train:
+        plot:
+            run_id:
+                slurm_id : SLURM_JOB (specify 0 if not available)
+                description: job description
+                color: color_name (optional)
+            run_id:
+                slurm_id : SLURM_JOB (specify 0 if not available)
+                description : job description
+                color: color_name (optional)
+            ...
+
+    Parameters
+    ----------
+    yaml_file_path : str or Path
+        Path to the YAML file containing the configuration.
+    Returns
+    -------
+    dict
+        A dictionary with run IDs as keys and nested dicts containing job_id, description, 
+        and optional color as values.
+    """
+    with open(yaml_file_path) as f:
+        data = yaml.safe_load(f)
+
+    # Extract configuration for plotting training diagnostics
+    config_dict_temp = data.get("train", {}).get("plot", {})
+
+    # sanity checks
+    assert len(config_dict_temp) > 0, "At least one run must be specified."
+
+    # convert to standardized format with proper keys
+    config_dict = {}
+    for k, v in config_dict_temp.items():
+        assert isinstance(v["slurm_id"], int), "slurm_id has to be int."
+        assert isinstance(v["description"], str), "description has to be str."
+        
+        config_dict[k] = {
+            "job_id": v["slurm_id"],
+            "description": v["description"]
+        }
+        
+        # Add color if specified
+        if "color" in v:
+            config_dict[k]["color"] = v["color"]
+
+    return config_dict
+
+
+####################################################################################################
+def _normalize_color(color):
+    """Convert any color format to hex for comparison."""
+    try:
+        return mcolors.to_hex(color).lower()
+    except (ValueError, AttributeError):
+        return color.lower()
+
+
+####################################################################################################
+def _get_colors_for_runs(runs_ids: dict, num_runs: int) -> list:
+    """
+    Get a list of colors for each run. Uses specified colors from runs_ids dict
+    and fills remaining with matplotlib default cycle, excluding already used colors.
+    Automatically assigned colors never match explicitly specified colors.
+    Colors are normalized to hex format for accurate comparison.
+
+    Parameters
+    ----------
+    runs_ids : dict
+        Dictionary with run IDs as keys and dicts containing job_id, description, 
+        and optional color as values.
+    num_runs : int
+        Number of runs (must match len(runs_ids))
+
+    Returns
+    -------
+    list
+        List of colors for each run in the order of runs_ids keys.
+    """
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    default_colors = list(prop_cycle.by_key()["color"])
+    fallback_colors = ["r", "g", "b", "k", "y", "m"]
+    
+    colors = []
+    explicitly_specified_colors = set()
+    
+    # First pass: collect all explicitly specified colors (normalized to hex)
+    for run_id in runs_ids.keys():
+        run_info = runs_ids[run_id]
+        if "color" in run_info:
+            color = run_info["color"]
+            normalized = _normalize_color(color)
+            explicitly_specified_colors.add(normalized)
+    
+    # Build available colors pool for auto-assignment
+    # Exclude colors that were explicitly specified
+    available_colors = []
+    for color in default_colors:
+        normalized = _normalize_color(color)
+        if normalized not in explicitly_specified_colors:
+            available_colors.append(color)
+    
+    # Add fallback colors if needed
+    for color in fallback_colors:
+        normalized = _normalize_color(color)
+        if normalized not in explicitly_specified_colors:
+            available_colors.append(color)
+    
+    # Second pass: assign colors
+    auto_color_idx = 0
+    
+    for run_id in runs_ids.keys():
+        run_info = runs_ids[run_id]
+        
+        if "color" in run_info:
+            # Explicit color - use as specified
+            colors.append(run_info["color"])
+        else:
+            # No explicit color - assign from available pool (excluding explicit colors)
+            if auto_color_idx < len(available_colors):
+                colors.append(available_colors[auto_color_idx])
+                auto_color_idx += 1
+            else:
+                # Fallback if we run out of available colors (cycle through)
+                colors.append(available_colors[auto_color_idx % len(available_colors)])
+                auto_color_idx += 1
+    
+    return colors
+
+
+####################################################################################################
+def clean_plot_folder(plot_dir: Path):
+    """
+    Clean the plot folder by removing all png-files in it.
+
+    Parameters
+    ----------
+    plot_dir : Path
+        Path to the plot directory
+    """
+    for image in plot_dir.glob("*.png"):
+        image.unlink()
+
+
+####################################################################################################
+def get_stream_names(run_id: str, model_path: Path | None = "./model"):
+    """
+    Get the stream names from the model configuration file.
+
+    Parameters
+    ----------
+    run_id : str
+        ID of the training run
+    model_path : Path
+        Path to the model directory
+    Returns
+    -------
+    list
+        List of stream names
+    """
+    # return col names from training (should be identical to validation)
+    cf = config.load_run_config(run_id, None, model_path=model_path)
+    return [
+        stream_name.replace(",", "").replace("/", "_").replace(" ", "_")
+        for stream_name in cf.streams.keys()
+    ]
+
+####################################################################################################
+def plot_lr(
+    runs_ids: dict[str, dict],
+    runs_data: list[Metrics],
+    runs_active: list[bool],
+    plot_dir: Path,
+    colors: list | None = None,
+    x_axis: str = "samples",
+    legend_outside: bool = False,
+):
+    """
+    Plot learning rate curves of training runs.
+
+    Parameters
+    ----------
+    runs_ids : dict
+        dictionary with run ids as keys and dicts with job_id, description, and optional color as values
+    runs_data : list
+        list of Metrics objects containing the training data
+    runs_active : list
+        list of booleans indicating whether the run is still active
+    plot_dir : Path
+        directory to save the plots
+    colors : list
+        list of colors for each run. If None, default matplotlib colors are used.
+    x_axis : str
+        x-axis strings used in the column names (options: "samples", "dtime")
+    legend_outside : bool
+        whether to place legend outside the plot
+    """
+    if colors is None:
+        colors = _get_colors_for_runs(runs_ids, len(runs_ids))
+    
+    _fig = plt.figure(figsize=(10, 7), dpi=300)
+
+    linestyle = "-"
+
+    legend_str = []
+    for j, run_data in enumerate(runs_data):
+        if run_data.train.is_empty():
+            continue
+        run_id = run_data.run_id
+        x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
+        data_cols = list(filter(lambda c: "learning_rate" in c, run_data.train.columns))
+
+        x_vals = run_data.train[x_col]
+        y_vals = np.array(run_data.train[data_cols])
+        mask = y_vals > 1000.0
+        y_vals[mask] = 0.0  # np.nan
+
+        plt.plot(x_vals, y_vals, linestyle, color=colors[j % len(colors)])
+        legend_str += [
+            ("R" if runs_active[j] else "X") + " : " + run_id + " : " + runs_ids[run_id]["description"]
+        ]
+
+    if len(legend_str) < 1:
+        _logger.warning(
+            "Could not find any data for plotting the learning rates of the runs: ", runs_ids
+        )
+        return
+
+    plt.grid(True, which="both", ls="-")
+    plt.yscale("log")
+    plt.title("learning rate")
+    plt.ylabel("lr")
+    plt.xlabel(x_axis)
+    plt.tight_layout()
+    _add_legend(legend_str, legend_outside=legend_outside)
+    rstr = "".join([f"{r}_" for r in runs_ids])
+
+    if len(rstr) + 6 > MAX_FILENAME_LEN:
+        rstr = rstr[: MAX_FILENAME_LEN - 6]
+
+    # save the plot
+    plt_fname = plot_dir / f"{rstr}lr.png"
+    _logger.info(f"Saving learning rate plot to '{plt_fname}'")
+    plt.savefig(plt_fname, bbox_inches="tight")
+    plt.close()
+
+
+def plot_loss_avg(
+    plot_dir: Path,
+    runs_ids: dict[str, dict],
+    runs_data: list[Metrics],
+    runs_active: list[bool],
+    colors: list | None = None,
+    stage=TRAIN,
+    x_scale_log: bool = False,
+    legend_outside: bool = False,
+):
+    """
+    Plot average loss curves of training runs.
+
+    Parameters
+    ----------
+    plot_dir : Path
+        directory to save the plots
+    runs_ids : dict
+        dictionary with run ids as keys and dicts with job_id, description, and optional color as values
+    runs_data : list
+        list of Metrics objects containing the training data
+    runs_active : list
+        list of booleans indicating whether the run is still active
+    colors : list
+        list of colors for each run. If None, default matplotlib colors are used.
+    stage : str
+        stage to plot (e.g., "train" or "val")
+    x_scale_log : bool
+        whether to use log scale for x-axis
+    legend_outside : bool
+        whether to place legend outside the plot
+    """
+    if colors is None:
+        colors = _get_colors_for_runs(runs_ids, len(runs_ids))
+
+    _fig = plt.figure(figsize=(10, 7), dpi=300)
+
+    legend_str = []
+    for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
+        run_data_stage = run_data.train if stage == TRAIN else run_data.val
+        x_vals = np.array(run_data_stage["num_samples"])
+        y_vals = np.array(run_data_stage["loss_avg_mean"])
+
+        mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_vals))
+
+        plt.plot(
+            x_vals[mask],
+            y_vals[mask],
+            color=colors[i_run % len(colors)],
+        )
+        legend_str += [
+            ("R" if runs_active[i_run] else "X") + " : " + run_id + " : " + runs_ids[run_id]["description"]
+        ]
+
+    plt.grid(True, which="both", ls="-")
+    plt.yscale("log")
+    # cap at 1.0 in case of divergence of run (through normalziation, max should be around 1.0)
+    # plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
+    if x_scale_log:
+        plt.xscale("log")
+    plt.title("average loss")
+    plt.ylabel("loss")
+    plt.xlabel("step")
+    plt.tight_layout()
+    _add_legend(legend_str, legend_outside=legend_outside)
+    rstr = "".join([f"{r}_" for r in runs_ids])
+
+    if len(rstr) + len(f"{str(stage)}_avg.png") > MAX_FILENAME_LEN:
+        rstr = rstr[: MAX_FILENAME_LEN - len(f"{str(stage)}_avg.png")]
+
+    plt_fname = plot_dir / f"{rstr}{str(stage)}_avg.png"
+    _logger.info(f"Saving avg plot to '{plt_fname}'")
+    plt.savefig(plt_fname, bbox_inches="tight")
+    plt.close()
+
+
+####################################################################################################
+def plot_loss_per_stream(
+    modes: list[str],
+    runs_ids: dict[str, dict],
+    runs_data: list[Metrics],
+    runs_active: list[bool],
+    stream_names: list[str],
+    plot_dir: Path,
+    errs: list[str],
+    channels: list[str],
+    forecast_steps: list[int],
+    colors: list | None = None,
+    x_axis: str = "samples",
+    x_type: str = "step",
+    x_lim: list[float] | None = None,
+    y_lim: list[float] | None = None,
+    x_scale_log: bool = False,
+    legend_outside: bool = False,
+):
+    """
+    Plot each stream in stream_names (using matching to data columns) for all run_ids
+
+    Parameters
+    ----------
+    modes : list
+        list of modes for which losses are plotted (e.g. train, val)
+    runs_ids : dict
+        dictionary with run ids as keys and dicts with job_id, description, and optional color as values
+    runs_data : list
+        list of Metrics objects containing the training data
+    runs_active : list
+        list of booleans indicating whether the run is still active
+    stream_names : list
+        list of stream names to plot
+    plot_dir : Path
+        directory to save the plots
+    errs : list
+        list of errors to plot (e.g. mse, stddev)
+    channels : list
+        list of channels to plot
+    forecast_steps : list
+        list of forecast steps to plot
+    colors : list
+        list of colors for each run. If None, default matplotlib colors are used.
+    x_axis : str
+        x-axis strings used in the column names (options: "samples", "dtime")
+    x_type : str
+        x-axis type (options: "step", "reltime")
+    x_lim : list
+        x-axis limits
+    y_lim : list
+        y-axis limits
+    x_scale_log : bool
+        whether to use log scale for x-axis
+    legend_outside : bool
+        whether to place legend outside the plot
+    """
+
+    if colors is None:
+        colors = _get_colors_for_runs(runs_ids, len(runs_ids))
+
+    modes = [modes] if type(modes) is not list else modes
+
+    for err in errs:
+        for channel in channels:
+            for stream_name in stream_names:
+                _fig = plt.figure(figsize=(10, 7), dpi=300)
+
+                legend_strs = []
+                min_val = np.finfo(np.float32).max
+                max_val = 0.0
+                for mode in modes:
+                    legend_strs += [[]]
+                    linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
+                    linestyle = ":" if "stddev" in err else linestyle
+                    alpha = 1.0
+                    if "train" in modes and "val" in modes:
+                        alpha = 0.35 if "train" in mode else alpha
+
+                    for j, run_data in enumerate(runs_data):
+                        run_data_mode = run_data.by_mode(mode)
+                        if run_data_mode.is_empty():
+                            continue
+                        # find the col of the request x-axis (e.g. samples)
+                        x_col = next(filter(lambda c: x_axis in c, run_data_mode.columns))
+                        # find the cols of the requested metric (e.g. mse) and channel
+                        # for all streams
+                        data_cols = []
+                        for col in run_data_mode.columns:
+                            col_split = col.split(".")
+                            if len(col_split) < 4:
+                                if stream_name in col:
+                                    data_cols += [col]
+                            elif len(col_split) == 4:
+                                if (
+                                    col_split[1].lower() == stream_name.lower()
+                                    and col_split[2].lower() == err.lower()
+                                    and col_split[3] == channel
+                                ):
+                                    data_cols += [col]
+                            elif len(col_split) == 5:
+                                if (
+                                    col_split[1].lower() == stream_name.lower()
+                                    and col_split[2].lower() == err.lower()
+                                    and col_split[3] == channel
+                                    and int(col_split[4]) in forecast_steps
+                                ):
+                                    data_cols += [col]
+
+                        for col in data_cols:
+                            x_vals = np.array(run_data_mode[x_col])
+                            y_data = np.array(run_data_mode[col])
+                            mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_data))
+
+                            plt.plot(
+                                x_vals[mask],
+                                y_data[mask],
+                                linestyle,
+                                color=colors[j % len(colors)],
+                                alpha=alpha,
+                            )
+                            legend_strs[-1] += [
+                                ("R" if runs_active[j] else "X")
+                                + " : "
+                                + run_data.run_id
+                                + " : "
+                                + runs_ids[run_data.run_id]["description"]
+                                + ": "
+                                + col
+                            ]
+
+                            # skip all-nan slices
+                            if (~np.isnan(y_data)).sum() > 0:
+                                min_val = np.min([min_val, np.nanmin(y_data)])
+                                max_val = np.max([max_val, np.nanmax(y_data)])
+
+                # TODO: ensure that legend is plotted with full opacity
+                legend_str = legend_strs[0]
+                if len(legend_str) < 1:
+                    plt.close()
+                    _logger.warning(f"Could not find any data for stream: {stream_name}")
+                    continue
+
+                # no valid data found
+                if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
+                    plt.close()
+                    continue
+
+                plt.grid(True, which="both", ls="-")
+
+                plt.yscale("log")
+                if x_scale_log:
+                    plt.xscale("log")
+
+                if y_lim is not None:
+                    plt.ylim(y_lim)
+                else:
+                    plt.ylim([0.95 * min_val, 1.025 * max_val])
+                if x_lim is not None:
+                    plt.xlim(x_lim)
+
+                plt.title(stream_name + ": " + channel + " (" + ", ".join(modes) + ")")
+                plt.ylabel(err)
+                plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
+                plt.tight_layout()
+                _add_legend(legend_str, legend_outside=legend_outside)
+
+                # construct file name
+                run_ids_str = "".join([f"{r}_" for r in runs_ids])
+                fname_tail = "{}fs_{}{}_{}_{}.png".format(
+                    "".join([f"{m}_" for m in modes]),
+                    "".join([f"{fs}_" for fs in forecast_steps]),
+                    err,
+                    stream_name,
+                    channel,
+                )
+                # ensure file name is not too long
+                if len(run_ids_str) + len(fname_tail) > MAX_FILENAME_LEN:
+                    # cut off run_ids_str so that the tail with err, channel etc is preserved
+                    # required to retain unique names
+                    run_ids_str = run_ids_str[: MAX_FILENAME_LEN - len(fname_tail)]
+                fname = run_ids_str + fname_tail
+
+                # save the plot
+                plt_fname = plot_dir / fname
+
+                _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
+                plt.savefig(plt_fname, bbox_inches="tight")
+                plt.close()
+
+
+####################################################################################################
+def plot_loss_per_run(
+    modes: list[str],
+    run_id: str,
+    run_config: dict,
+    run_data: Metrics,
+    stream_names: list[str],
+    channels: list[str] | None,
+    plot_dir: Path,
+    errs: list[str] | None = None,
+    color: str | None = None,
+    x_axis: str = "samples",
+    x_scale_log: bool = False,
+    legend_outside: bool = False,
+):
+    """
+    Plot all stream_names (using matching to data columns) for given run_id
+
+    Parameters
+    ----------
+    modes : list
+        list of modes for which losses are plotted (e.g. train, val)
+    run_id : str
+        ID of the training run to plot
+    run_config : dict
+        Dictionary with run configuration (job_id, description, optional color)
+    run_data : Metrics
+        Metrics object containing the training data
+    stream_names : list
+        list of stream names to plot
+    channels : list
+        list of channels to plot
+    plot_dir : Path
+        directory to save the plots
+    errs : list
+        list of errors to plot (e.g. mse, stddev)
+    color : str
+        color for this run. If None, default matplotlib colors are used.
+    x_axis : str
+        x-axis strings used in the column names (options: "samples", "dtime")
+    x_scale_log : bool
+        whether to use log scale for x-axis
+    legend_outside : bool
+        whether to place legend outside the plot
+    """
+    if errs is None:
+        errs = ["mse"]
+
+    plot_dir = Path(plot_dir)
+
+    modes = [modes] if type(modes) is not list else modes
+    # repeat colors when train and val is plotted simultaneously
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    default_colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
+
+    _fig = plt.figure(figsize=(10, 7), dpi=300)
+
+    legend_strs = []
+    for mode in modes:
+        legend_strs += [[]]
+        for err in errs:
+            linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
+            linestyle = ":" if "stddev" in err else linestyle
+            alpha = 1.0
+            if "train" in modes and "val" in modes:
+                alpha = 0.35 if "train" in mode else alpha
+            run_data_mode = run_data.by_mode(mode)
+
+            x_col = [c for _, c in enumerate(run_data_mode.columns) if x_axis in c][0]
+            # find the cols of the requested metric (e.g. mse) for all streams
+            data_cols = [c for _, c in enumerate(run_data_mode.columns) if err in c]
+            data_cols = []
+            for col in run_data_mode.columns:
+                col_split = col.split(".")
+                if len(col_split) < 4:
+                    continue
+                if col_split[2].lower() == err.lower() and col_split[3] == channels:
+                    data_cols += [col]
+
+            data_cols = list(data_cols)
+
+            for _, col in enumerate(data_cols):
+                for j, stream_name in enumerate(stream_names):
+                    if stream_name.lower() in col.lower():
+                        # skip when no data is available
+                        if run_data_mode[col].shape[0] == 0:
+                            continue
+
+                        x_vals = np.array(run_data_mode[x_col])
+                        y_data = np.array(run_data_mode[col])
+
+                        plot_color = color if color is not None else default_colors[j % len(default_colors)]
+                        plt.plot(
+                            x_vals,
+                            y_data,
+                            linestyle,
+                            color=plot_color,
+                            alpha=alpha,
+                        )
+                        legend_strs[-1] += [col]
+
+    legend_str = legend_strs[0]
+    if len(legend_str) < 1:
+        _logger.warning(f"Could not find any data for run: {run_id}")
+        plt.close()
+        return
+
+    plt.title(run_id + " : " + run_config["description"])
+    plt.yscale("log")
+    if x_scale_log:
+        plt.xscale("log")
+    plt.grid(True, which="both", ls="-")
+    plt.ylabel("loss")
+    plt.xlabel("samples")
+    plt.tight_layout()
+    _add_legend(legend_str, legend_outside=legend_outside)
+
+    sstr = "".join(
+        [f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str]
+    )
+
+    # save the plot
+    fname_base = "{}_{}".format(run_id, "".join([f"{m}_" for m in modes]))
+    fname_suffix = ".png"
+
+    if len(fname_base) + len(sstr) + len(fname_suffix) > MAX_FILENAME_LEN:
+        sstr = sstr[: MAX_FILENAME_LEN - len(fname_base) - len(fname_suffix)]
+    fname = fname_base + sstr + fname_suffix
+
+    plt_fname = plot_dir / fname
+
+    _logger.info(f"Saving loss plot for {run_id}-run to '{plt_fname}'")
+    plt.savefig(plt_fname, bbox_inches="tight")
+    plt.close()
+
+
+def plot_train(args=None):
+    # Example usage:
+    # When providing a YAML for configuring the run IDs:
+    # python plot_training.py -fy eval_run.yml -m ./trained_models -o ./training_plots
+    # When providing a string for configuring the run IDs:
+    # python plot_training.py -fd "{run_id: {job_id: 123, description: 'exp1'}}" -m ./trained_models -o ./training_plots
+    # With colors specified:
+    # python plot_training.py -fy eval_run.yml -m ./trained_models -o ./training_plots
+    #   where eval_run.yml contains: 
+    #   train:
+    #     plot:
+    #       run_id:
+    #         slurm_id: 0
+    #         description: "Experiment 1"
+    #         color: "tab:blue"
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    parser = argparse.ArgumentParser(
+        description="""Plot training diagnostics from logged data during training.
+                       An example YAML file looks like this:
+                            train:
+                                plot:
+                                    run_id:
+                                        slurm_id : SLURM_JOB (specify 0 if not available)
+                                        description: job description
+                                        color: color_name (optional, e.g., 'tab:blue', '#FF5733')
+                                    run_id:
+                                        slurm_id : SLURM_JOB (specify 0 if not available)
+                                        description : job description
+                                        color: color_name (optional)
+                                            ...
+
+                        A dictionary-string can also be specified on the command line, e.g.:\n
+                            "{'abcde': {'job_id': 123456, 'description': 'experiment1'},\n
+                            'fghij': {'job_id': 654321, 'description': 'experiment2'}}"\n
+                            or with colors:\n
+                            "{'abcde': {'job_id': 123456, 'description': 'experiment1', 'color': 'tab:blue'},\n
+                            'fghij': {'job_id': 654321, 'description': 'experiment2', 'color': 'tab:red'}}"\n
+                        """
+    )
+
+    parser.add_argument(
+        "-o", "--output_dir", default="./plots/", type=Path, help="Directory where plots are saved"
+    )
+    parser.add_argument(
+        "--legend-outside",
+        default=False,
+        action="store_true",
+        help="Legend outside of the plot",
+    )
+    parser.add_argument(
+        "-m",
+        "--model_base_dir",
+        default=None,
+        type=Path,
+        help="Base-directory where models are saved",
+    )
+    parser.add_argument(
+        "-d",
+        "--delete",
+        default=False,
+        action="store_true",
+        help="Delete all plots in the output directory before plotting",
+    )
+    parser.add_argument(
+        "--streams",
+        "-s",
+        dest="streams",
+        default=["ERA5"],
+        type=str,
+        nargs="+",
+        help="List of streams to plot",
+    )
+    parser.add_argument(
+        "--channels",
+        dest="channels",
+        default=["avg"],
+        type=str,
+        nargs="+",
+        help="List of channels to plot",
+    )
+    parser.add_argument(
+        "--forecast-steps",
+        dest="forecast_steps",
+        default=[0, 1],
+        type=int,
+        nargs="+",
+        help="List of channels to plot",
+    )
+    parser.add_argument(
+        "--metrics",
+        dest="metrics",
+        default=["mse"],
+        type=str,
+        nargs="+",
+        help="List of metrics (e.g. mse) to plot",
+    )
+    parser.add_argument(
+        "--per-stream-x-lim",
+        dest="per_stream_x_lim",
+        default=None,
+        type=float,
+        nargs="+",
+        help="x-lim for per-stream plots",
+    )
+    parser.add_argument(
+        "--per-stream-y-lim",
+        dest="per_stream_y_lim",
+        default=None,
+        type=float,
+        nargs="+",
+        help="x-lim for per-stream plots",
+    )
+    parser.add_argument(
+        "--x_type",
+        "-x",
+        dest="x_type",
+        default="step",
+        type=str,
+        choices=["step", "reltime"],
+        help="Type of x-axis used in plots. Options: 'step' or 'reltime'",
+    )
+    parser.add_argument(
+        "--log-x",
+        dest="log_x",
+        default=False,
+        action="store_true",
+        help="Use log scale for the x-axis (produces log-log plots)",
+    )
+
+    run_id_group = parser.add_mutually_exclusive_group()
+    run_id_group.add_argument(
+        "-fd",
+        "--from_dict",
+        type=_read_str_config,
+        dest="fd",
+        help="Dictionary-string of form '{run_id: {job_id: ..., description: ...}}' or "
+        "'{run_id: {job_id: ..., description: ..., color: ...}}' for training runs to plot",
+    )
+
+    run_id_group.add_argument(
+        "-fy",
+        "--from_yaml",
+        dest="fy",
+        type=_read_yaml_config,
+        help="YAML file configuring the training run ids to plot",
+    )
+
+    # parse the command line arguments
+    args = parser.parse_args(args)
+
+    model_base_dir = Path(args.model_base_dir) if args.model_base_dir else None
+    out_dir = Path(args.output_dir)
+    streams = list(args.streams)
+    x_types_valid = ["step"]  # TODO: add "reltime" support when fix available
+    if args.x_type not in x_types_valid:
+        raise ValueError(f"x_type must be one of {x_types_valid}, but got {args.x_type}")
+
+    # Post-processing default logic for config from YAML-file
+    if args.fd is None and args.fy is None:
+        if DEFAULT_RUN_FILE.exists():
+            args.fy = _read_yaml_config(DEFAULT_RUN_FILE)
+        else:
+            raise ValueError(
+                f"Please provide a run_id dictionary or a YAML file with run_ids, "
+                f"or create a default file at {DEFAULT_RUN_FILE}."
+            )
+
+    runs_ids = args.fd if args.fd is not None else args.fy
+
+    if args.delete == "True":
+        clean_plot_folder(out_dir)
+
+    # collect all physical streams from all run_ids if requested
+    if "all" in streams:
+        for run_id in runs_ids:
+            # Load config from given model_path if provided, otherwise use path from private config
+            if model_base_dir:
+                cf = config.load_run_config(
+                    run_id=run_id, mini_epoch=None, model_path=model_base_dir
+                )
+            else:
+                cf = config.load_merge_configs(
+                    private_home=None,
+                    from_run_id=run_id,
+                    mini_epoch=None,
+                )
+            for stream_info in cf.streams:
+                streams += [stream_info["name"]]
+        # ensure items are unique
+        streams = list(set(streams))
+        # remove "all" key that is a special flag and not an actual stream name
+        streams.remove("all")
+
+    # read logged data
+    runs_data = [
+        TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
+        for run_id in runs_ids
+    ]
+
+    # determine which runs are still alive (as a process, though they might hang internally)
+    ret = subprocess.run(["squeue"], capture_output=True)
+    lines = str(ret.stdout).split("\\n")
+    runs_active = [
+        np.array([str(v["job_id"]) in line for line in lines[1:]]).any() for v in runs_ids.values()
+    ]
+
+    x_scale_log = args.log_x
+
+    # Get colors for all runs
+    run_colors = _get_colors_for_runs(runs_ids, len(runs_ids))
+
+    # plot learning rate
+    plot_lr(
+        runs_ids, 
+        runs_data, 
+        runs_active, 
+        plot_dir=out_dir, 
+        colors=run_colors,
+        legend_outside=args.legend_outside
+    )
+
+    # plot average loss
+    plot_loss_avg(
+        out_dir,
+        runs_ids,
+        runs_data,
+        runs_active,
+        colors=run_colors,
+        stage=TRAIN,
+        legend_outside=args.legend_outside,
+    )
+
+    # compare different runs
+    plot_loss_per_stream(
+        ["train", "val"],
+        runs_ids,
+        runs_data,
+        runs_active,
+        streams,
+        errs=args.metrics,
+        channels=args.channels,
+        forecast_steps=args.forecast_steps,
+        colors=run_colors,
+        x_type=args.x_type,
+        x_scale_log=x_scale_log,
+        x_lim=args.per_stream_x_lim,
+        y_lim=args.per_stream_y_lim,
+        legend_outside=args.legend_outside,
+        plot_dir=out_dir,
+    )
+    plot_loss_per_stream(
+        ["val"],
+        runs_ids,
+        runs_data,
+        runs_active,
+        streams,
+        errs=args.metrics,
+        channels=args.channels,
+        forecast_steps=args.forecast_steps,
+        colors=run_colors,
+        x_type=args.x_type,
+        x_scale_log=x_scale_log,
+        x_lim=args.per_stream_x_lim,
+        y_lim=args.per_stream_y_lim,
+        legend_outside=args.legend_outside,
+        plot_dir=out_dir,
+    )
+    plot_loss_per_stream(
+        ["train"],
+        runs_ids,
+        runs_data,
+        runs_active,
+        streams,
+        errs=args.metrics,
+        channels=args.channels,
+        forecast_steps=args.forecast_steps,
+        colors=run_colors,
+        x_type=args.x_type,
+        x_scale_log=x_scale_log,
+        x_lim=args.per_stream_x_lim,
+        y_lim=args.per_stream_y_lim,
+        legend_outside=args.legend_outside,
+        plot_dir=out_dir,
+    )
+
+    # plot all cols for all run_ids
+    for idx, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
+        run_color = run_colors[idx] if idx < len(run_colors) else None
+        plot_loss_per_run(
+            ["train", "val"],
+            run_id,
+            runs_ids[run_id],
+            run_data,
+            get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
+            channels=args.channels,
+            plot_dir=out_dir,
+            color=run_color,
+            legend_outside=args.legend_outside,
+        )
+    
+    plot_loss_per_run(
+        ["val"],
+        run_id,
+        runs_ids[run_id],
+        run_data,
+        get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
+        channels=args.channels,
+        plot_dir=out_dir,
+        color=run_color,
+        legend_outside=args.legend_outside,
+    )
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]  # get CLI args
+
+    try:
+        plot_train(args)
+    except Exception:
+        extype, value, tb = sys.exc_info()
+        traceback.print_exc()
+        pdb.post_mortem(tb)

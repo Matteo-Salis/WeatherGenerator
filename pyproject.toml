@@ -12,6 +12,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
+ 'healpy>=1.19,<2',
  'zarr~=3.1.3',
  'pandas~=2.2',
  'tqdm',
@@ -48,6 +49,7 @@ train_continue = "weathergen.run_train:train_continue"
 inference = "weathergen.run_train:inference"
 evaluate = "weathergen.evaluate.run_evaluation:evaluate"
 plot_train = "weathergen.utils.plot_training:plot_train"
+plot_train2 = "weathergen.utils.plot_training2:plot_train"
 export = "weathergen.evaluate.export.export_inference:export"
 
 [build-system]
@@ -65,8 +67,7 @@ dev = [
  "jupytext>=1.17.2",
  "pytest>=8.3",
  "pytest-mock>=3.14.1",
- # If you change the version, also change it in scripts/actions.sh
- "ruff==0.12.2",
+ "ruff==0.9.7",
  "tensorboard>=2.20.0",
  "pdbpp>=0.11.7",
  "pylint==4.0.3",

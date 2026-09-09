@@ -1,0 +1,90 @@
+global_plotting_options:
+ regions: ["cerra"]
+ image_format : "png" 
+ dpi_val : 500
+ fps: 2
+
+evaluation:
+  metrics  : ["rmse"]
+  regions: ["cerra"]
+  summary_plots : true
+  ratio_plots : true
+  heat_maps : false
+  summary_dir: "./plots/MF/eval_plots/CERRA_experiments/latent_space"
+  plot_ensemble: false #supported: false, "std", "minmax", "members"
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  print_summary: false #print out score values on screen. it can be verbose
+  log_scale: false
+  add_grid: false
+  score_cards: false
+  bar_plots: true
+  num_processes: "auto"  #options: int, "auto", 0 means no parallelism (default)
+  
+default_streams:
+  CERRA:
+    channels: ["2t", "msl", "r_850", "t_850", "u_850", "v_850", "z_850"] #, "blah"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+    plotting:
+      sample: [1,2,3]
+      forecast_step: "all"
+      ensemble: "mean"
+      plot_maps: true
+      plot_bias: true
+      plot_target: true
+      plot_histograms: true
+      plot_animations: true
+      
+run_ids :
+
+      # ja0bdtgl:
+      #   label: "CERRA abs coord 3h-3h - baseline - e128"
+      #   color: "tab:red"
+      #   rank: "all"
+
+      # hkzxrtmh:
+      #     label: "CERRA abs coord 3h-3h - baseline - e256"
+      #     color: "tab:blue"
+      #     rank: "all"
+
+      # zgz7zx6p:
+      #     label: "Alternative pe_global - 128"
+      #     color: "tab:orange"
+      #     rank: "all"
+
+      # jcoxmlug:
+      #     label: "Alternative pe_global - 256"
+      #     color: "tab:green"
+      #     rank: "all"
+
+      # nr09wzac:
+      #     label: "ae_global_num_blocks: 8 - 0.897 B"
+      #     color: "tab:purple"
+      #     rank: "all"
+
+      # cn4rk8qv:
+      #     label: "Increased ae_global_num_blocks: 16 - 1.16B "
+      #     color: "tab:pink"
+      #     rank: "all"
+
+      yapr5xlh:
+          label: "ae_global_dim_embed: 4096 - 2.84 B"
+          color: "tab:brown"
+          rank: "all"
+
+      p23os14y:
+          label: "ae_global_num_blocks: 8 + ae_global_dim_embed: 4096  - 3.38 B"
+          color: "tab:olive"
+          rank: "all"
+
+      gtkim87u:
+          label: "HLP 6"
+          color: "tab:cyan"
+          rank: "all"
+
+      # p4zy2yt4:
+      #     label: "CERRA abs hack 3h-3h - ema 1e-3 - C.L. decoder"
+      #     color: "tab:brown"
+      #     rank: "all"
