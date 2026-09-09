@@ -1,42 +1,55 @@
 train:
   plot:
-    
+    y5hjw77o:
+          slurm_id : 0
+          description: "CERRA HLP 6"
+          color: "tab:blue"
+
+    e1gc3q4w:
+          slurm_id : 0
+          description: "CERRA HLP 6 - Resumed"
+          color: "tab:red"
+
+    pz1rsfif:
+          slurm_id : 0
+          description: "CERRA HLP 6 - PE Alternative"
+          color: "tab:green"
     # mvphslyf:
     #     slurm_id : 0
     #     description: "CERRA coord hack 3h-6h - 1fstep - E128"
     #     color: "tab:blue"
     
-    akmqbd3l:
-        slurm_id : 0
-        description: "CERRA rel coord 3h-3h - ema 1e-3"
-        color: "tab:red"
+    # akmqbd3l:
+    #     slurm_id : 0
+    #     description: "CERRA rel coord 3h-3h - ema 1e-3"
+    #     color: "tab:red"
 
-    h0hcwbum:
-        slurm_id : 0
-        description: "CERRA abs hack 3h-3h - ema 600"
-        color: "tab:orange"
-    xiynjep9:
-        slurm_id : 0
-        description: "Resumed"
-        color: "tab:orange"
+    # h0hcwbum:
+    #     slurm_id : 0
+    #     description: "CERRA abs hack 3h-3h - ema 600"
+    #     color: "tab:orange"
+    # xiynjep9:
+    #     slurm_id : 0
+    #     description: "Resumed"
+    #     color: "tab:orange"
 
-    tnjpexsk:
-        slurm_id : 0
-        description: "CERRA abs hack 3h-3h - ema 1e-3"
-        color: "tab:blue"
-    yidjxc2c :
-        slurm_id : 0
-        description: "CERRA abs config 3h-3h - ema 1e-3"
+    # tnjpexsk:
+    #     slurm_id : 0
+    #     description: "CERRA abs hack 3h-3h - ema 1e-3"
+    #     color: "tab:blue"
+    # yidjxc2c :
+    #     slurm_id : 0
+    #     description: "CERRA abs config 3h-3h - ema 1e-3"
 
-    p26cps15:
-        slurm_id : 0
-        description: "CERRA abs hack 3h-3h - ema 1e-3 - C.L. decoder"
+    # p26cps15:
+    #     slurm_id : 0
+    #     description: "CERRA abs hack 3h-3h - ema 1e-3 - C.L. decoder"
 
-    jkjj7c90:
-        slurm_id : 0
-        description: "CERRA abs hack 3h-3h - unembed block - ema 1e-3"
-        color: "tab:purple"
+    # jkjj7c90:
+    #     slurm_id : 0
+    #     description: "CERRA abs hack 3h-3h - unembed block - ema 1e-3"
+    #     color: "tab:purple"
     
-    iksjizv6:
-        slurm_id : 0
-        description: "CERRA abs hack 3h-3h - ext fields - ema 1e-3"
+    # iksjizv6:
+    #     slurm_id : 0
+    #     description: "CERRA abs hack 3h-3h - ext fields - ema 1e-3"

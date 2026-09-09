@@ -69,20 +69,32 @@ run_ids :
       #     color: "tab:pink"
       #     rank: "all"
 
-      yapr5xlh:
-          label: "ae_global_dim_embed: 4096 - 2.84 B"
-          color: "tab:brown"
-          rank: "all"
+      # yapr5xlh:
+      #     label: "ae_global_dim_embed: 4096 - 2.84 B"
+      #     color: "tab:brown"
+      #     rank: "all"
 
-      p23os14y:
-          label: "ae_global_num_blocks: 8 + ae_global_dim_embed: 4096  - 3.38 B"
-          color: "tab:olive"
-          rank: "all"
+      # p23os14y:
+      #     label: "ae_global_num_blocks: 8 + ae_global_dim_embed: 4096  - 3.38 B"
+      #     color: "tab:olive"
+      #     rank: "all"
 
-      gtkim87u:
-          label: "HLP 6"
-          color: "tab:cyan"
-          rank: "all"
+      # k16pb59y:
+      #     label: "HLP 6"
+      #     color: "tab:cyan"
+      #     rank: "all"
+
+      # v84ryq3z:
+      #     label: "HLP 6"
+      #     rank: "all"
+
+      # rgtml9q5:
+      #     label: "HLP 6"
+      #     rank: "all"
+
+      ggqstjzz:
+            label: "HLP 6"
+            rank: "all"
 
       # p4zy2yt4:
       #     label: "CERRA abs hack 3h-3h - ema 1e-3 - C.L. decoder"
