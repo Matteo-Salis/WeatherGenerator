@@ -18,10 +18,16 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+<<<<<<< HEAD
 import earthkit.regrid.db as ekr_db
 import numpy as np
 import xarray as xr
 from earthkit.data import from_source
+=======
+import earthkit.regrid as ekr
+import numpy as np
+import xarray as xr
+>>>>>>> origin/develop-ssl-diffusion-v1
 from earthkit.regrid.gridspec import GridSpec as EkGridSpec
 from numpy.typing import NDArray
 
@@ -98,8 +104,12 @@ def build_gridded_dataarrays(
     init_times: NDArray,
     forecast_step_val: int,
     ens_select: EnsembleSelect,
+<<<<<<< HEAD
     regridder: Regridder | None = None,
     run_id: str = "",
+=======
+    regrid_opts: dict,
+>>>>>>> origin/develop-ssl-diffusion-v1
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """Build DataArrays for gridded data by stacking samples along a new axis.
 
@@ -130,19 +140,31 @@ def build_gridded_dataarrays(
     ens_select : EnsembleSelect
         Pre-resolved ensemble selection (from :meth:`EnsembleSelect.from_names`).
         ``EnsembleSelect.mean()`` → mean; otherwise selects members.
+<<<<<<< HEAD
     regridder : Regridder | None
         If provided, regrid each sample before stacking.  The Regridder
         holds the grid options (original_grid, target_grid) internally.
+=======
+    regrid_opts : dict
+        Regrid each sample from its original grid to a regular
+        lat/lon grid before stacking.  Must contain 'target_grid' (e.g. [1.5, 1.5]).
+        Optionally 'original_grid' to skip auto-detection.
+>>>>>>> origin/develop-ssl-diffusion-v1
 
     Returns
     -------
     da_tar, da_pred : xr.DataArray
     """
     # Regrid each sample individually (correct n_ipoints per sub-step)
+<<<<<<< HEAD
     if regridder is not None:
         tars_list, preds_list, lat, lon = regridder.regrid_dataarrays(
             tars_list, preds_list, run_id=run_id
         )
+=======
+    if regrid_opts:
+        tars_list, preds_list, lat, lon = regrid_dataarrays(tars_list, preds_list, regrid_opts)
+>>>>>>> origin/develop-ssl-diffusion-v1
 
     n_samples = len(samples)
     n_ipoints = tars_list[0].shape[0]
@@ -359,7 +381,11 @@ def _build_dataarray(
 
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # Numpy-level regridding
+=======
+# Numpy-level regridding (called inside each worker)
+>>>>>>> origin/develop-ssl-diffusion-v1
 # ---------------------------------------------------------------------------
 
 
@@ -399,6 +425,7 @@ def _detect_grid(n_ipoints: int, regrid_opts: dict) -> str:
     return grid
 
 
+<<<<<<< HEAD
 class Regridder:
     """
     Caches sparse interpolation matrices and applies them to numpy arrays.
@@ -520,3 +547,86 @@ class Regridder:
         lat, lon = self._get_output_coords(self._target_grid, out_shape)
 
         return tars_list, preds_list, lat, lon
+=======
+def _regrid_field(field_1d: NDArray, in_grid: dict, out_grid: dict) -> NDArray:
+    """Regrid a single 1D field and return the flattened result."""
+
+    result_2d = ekr.interpolate(field_1d, in_grid, out_grid)
+    return result_2d.ravel()
+
+
+def _regrid_array(data: NDArray, regrid_opts: dict) -> NDArray:
+    """Regrid a numpy array from a reduced Gaussian grid to a regular lat/lon grid.
+
+    Parameters
+    ----------
+    data : NDArray
+        Input array of shape ``(n_ipoints, n_channels)`` or
+        ``(n_ipoints, n_channels, n_ens)``.
+    regrid_opts : dict
+        Must contain 'target_grid' (e.g. [1.5, 1.5]).  Optionally
+        'original_grid' to skip auto-detection.
+
+    Returns
+    -------
+    NDArray
+        Regridded array of shape ``(n_lat * n_lon, n_channels[, n_ens])``.
+    """
+    n_ipoints = data.shape[0]
+    original_grid = regrid_opts.get("original_grid")
+    if original_grid is None:
+        original_grid = _detect_grid(n_ipoints, regrid_opts)
+    target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
+    if not isinstance(target_grid, str):
+        target_grid = list(target_grid)  # earthkit.regrid requires a plain list, not numpy array
+
+    in_grid = {"grid": original_grid}
+    out_grid = {"grid": target_grid}
+
+    if data.ndim == 2:
+        # (n_ipoints, n_channels)
+        n_channels = data.shape[1]
+        cols = [_regrid_field(data[:, ch], in_grid, out_grid) for ch in range(n_channels)]
+        out = np.column_stack(cols)
+    elif data.ndim == 3:
+        # (n_ipoints, n_channels, n_ens)
+        n_channels, n_ens = data.shape[1], data.shape[2]
+        slices = [
+            [_regrid_field(data[:, ch, e], in_grid, out_grid) for e in range(n_ens)]
+            for ch in range(n_channels)
+        ]
+        out = np.stack([np.column_stack(s) for s in slices], axis=1)
+    else:
+        raise ValueError(f"Unexpected data shape for regridding: {data.shape}")
+
+    return out
+
+
+def regrid_dataarrays(tars_list, preds_list, regrid_opts):
+    """Regrid each sample in tars_list and preds_list according to regrid_opts."""
+
+    tars_list = [_regrid_array(t, regrid_opts) for t in tars_list]
+    preds_list = [_regrid_array(p, regrid_opts) for p in preds_list]
+
+    target_grid = (
+        regrid_opts.get("target_grid", [1.5, 1.5]) if isinstance(regrid_opts, dict) else [1.5, 1.5]
+    )
+
+    # TODO: improve this. Now it works only for regular lat-lon grids
+    out_spec = {}
+    out_spec["grid"] = list(target_grid)
+    # Only keep keys relevant to the output grid spec
+    gs = EkGridSpec.from_dict(out_spec)
+    ymax, xmin, ymin, xmax = gs["area"]
+    dy, dx = gs["grid"]
+    n_lat_out = round((ymax - ymin) / dy) + 1
+    n_lon_out = round((xmax - xmin) / dx) + 1
+
+    lat_1d = np.linspace(ymin, ymax, n_lat_out)
+    lon_1d = np.linspace(xmin, xmax, n_lon_out)
+    lat_grid, lon_grid = np.meshgrid(lat_1d, lon_1d, indexing="ij")
+    lat = lat_grid.ravel()
+    lon = lon_grid.ravel()
+
+    return tars_list, preds_list, lat, lon
+>>>>>>> origin/develop-ssl-diffusion-v1

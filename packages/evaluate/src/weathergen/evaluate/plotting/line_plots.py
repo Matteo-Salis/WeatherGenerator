@@ -61,6 +61,7 @@ class LinePlots:
         self.add_grid = plotter_cfg.get("add_grid")
         self.plot_ensemble = plotter_cfg.get("plot_ensemble", False)
         self.baseline = plotter_cfg.get("baseline")
+<<<<<<< HEAD
         self._base_dir_lines = Path(output_basedir) / "line_plots"
         self._base_dir_ratio = Path(output_basedir) / "ratio_plots"
         self._base_dir_psd = Path(output_basedir) / "psd_plots"
@@ -95,6 +96,20 @@ class LinePlots:
 
         for d in (self.out_plot_dir_lines, self.out_plot_dir_ratio, self.out_plot_dir_psd):
             os.makedirs(d, exist_ok=True)
+=======
+        self.out_plot_dir_lines = Path(output_basedir) / "line_plots"
+        self.out_plot_dir_ratio = Path(output_basedir) / "ratio_plots"
+        self.out_plot_dir_psd = Path(output_basedir) / "psd_plots"
+        if not os.path.exists(self.out_plot_dir_lines):
+            _logger.info(f"Creating dir {self.out_plot_dir_lines}")
+            os.makedirs(self.out_plot_dir_lines, exist_ok=True)
+        if not os.path.exists(self.out_plot_dir_ratio):
+            _logger.info(f"Creating dir {self.out_plot_dir_ratio}")
+            os.makedirs(self.out_plot_dir_ratio, exist_ok=True)
+        if not os.path.exists(self.out_plot_dir_psd):
+            _logger.info(f"Creating dir {self.out_plot_dir_psd}")
+            os.makedirs(self.out_plot_dir_psd, exist_ok=True)
+>>>>>>> origin/develop-ssl-diffusion-v1
 
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
         """
@@ -376,7 +391,10 @@ class LinePlots:
             x_dim_opts,
             y_dim,
             print_summary,
+<<<<<<< HEAD
             line=line,
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
             title=title,
             out_plot_dir=self.out_plot_dir,
         )

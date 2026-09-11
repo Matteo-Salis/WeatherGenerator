@@ -277,6 +277,7 @@ class Scores:
             f = self.det_metrics_dict[score_name]
             _logger.debug(f"Using deterministic metric: {score_name}")
         elif score_name in self.prob_metrics_dict.keys():
+<<<<<<< HEAD
             if self._ens_dim not in data.prediction.dims:
                 _logger.warning(
                     f"Probabilistic score '{score_name}' chosen, but ensemble dimension "
@@ -284,6 +285,13 @@ class Scores:
                     f"{data.prediction.dims}. Skipping score calculation."
                 )
                 return None
+=======
+            assert self._ens_dim in data.prediction.dims, (
+                f"Probablistic score {score_name} chosen, but ensemble dimension {self._ens_dim} "
+                "not found in prediction data. Skipping score calculation."
+            )
+            return None
+>>>>>>> origin/develop-ssl-diffusion-v1
             f = self.prob_metrics_dict[score_name]
             _logger.debug(f"Using probabilistic metric: {score_name}")
         else:

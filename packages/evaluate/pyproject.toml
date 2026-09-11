@@ -23,8 +23,11 @@ dependencies = [
     "earthkit-utils==0.1.2",
     "imageio[ffmpeg]>=2.37.2",
     "scipy>=1.12",
+<<<<<<< HEAD
     "scores",
     "pypdf>=4.0",
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
     ]
 
 [dependency-groups]

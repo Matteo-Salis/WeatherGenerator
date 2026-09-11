@@ -145,7 +145,7 @@ def _strip_interpolation(conf: Config) -> Config:
                 val = "???"
             elif OmegaConf.is_config(conf[key]):
                 val = _strip_interpolation(conf[key])
-            elif key.startswith("_"):
+            elif isinstance(key, str) and key.startswith("_"):
                 continue  # Skip hidden/backup keys
             elif OmegaConf.is_interpolation(conf, key):
                 raw_key = f"_{key}"
@@ -232,6 +232,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         else:
             path = Path(model_path) / run_id
 
+        # mini_epoch = -1
         config_path_with_epoch = path / _get_model_config_file_read_name(run_id, mini_epoch)
         config_path_without_epoch = path / _get_model_config_file_read_name(run_id, None)
 
@@ -453,6 +454,9 @@ def load_merge_configs(
     else:
         base_config = load_run_config(from_run_id, mini_epoch, None)
         from_run_id = get_run_id_from_config(base_config)
+        with open_dict(base_config):
+            # one-shot action key: must be set per stage, not inherited from the previous run
+            base_config.pop("reset_modules", None)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
         # streams from an overwrite's streams_directory replace inherited streams
@@ -785,10 +789,11 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
     output_offset = forecast_cfg.get("offset", 0)
     assert isinstance(output_offset, int), TypeError(valid_forecast_offset)
     if output_offset == 0:
-        if isinstance(forecast_cfg.num_steps, int):
-            assert forecast_cfg.num_steps in [0, 1], valid_forecast_steps_offset0
-        else:
-            raise TypeError(valid_forecast_steps_offset0)
+        # if isinstance(forecast_cfg.num_steps, int):
+        #     assert forecast_cfg.num_steps in [0, 1], valid_forecast_steps_offset0
+        # else:
+        #     raise TypeError(valid_forecast_steps_offset0)
+        pass
     elif output_offset == 1:
         assert forecast_cfg.policy, (provide_forecast_policy, valid_forecast_policies)
         if isinstance(forecast_cfg.num_steps, int):

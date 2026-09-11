@@ -40,7 +40,10 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+<<<<<<< HEAD
 from scipy.interpolate import griddata
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
 
 _logger = logging.getLogger(__name__)
 
@@ -524,7 +527,10 @@ def fft_psd(
     lats: np.typing.NDArray,
     lons: np.typing.NDArray,
     lat_range: tuple[float, float] = (-60.0, 60.0),
+<<<<<<< HEAD
     regrid_resolution: float = 1.0,
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
 ) -> tuple[np.typing.NDArray, np.typing.NDArray]:
     """Compute PSD using 1-D zonal FFT along the longitude dimension.
 
@@ -545,8 +551,11 @@ def fft_psd(
         Longitude values (per-point), length ``n_points``.
     lat_range : tuple[float, float]
         Latitude bounds to restrict the computation to.
+<<<<<<< HEAD
     regrid_resolution : float
         Grid spacing in degrees for the regular target grid.
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
 
     Returns
     -------
@@ -555,6 +564,14 @@ def fft_psd(
     psd : np.typing.NDArray
         Power spectral density averaged over samples and latitude rows,
         shape ``(nfreq,)``.
+<<<<<<< HEAD
+=======
+
+    Raises
+    ------
+    ValueError
+        If the input grid is not a regular lat-lon grid.
+>>>>>>> origin/develop-ssl-diffusion-v1
     """
 
     # Ensure 2-D: (n_samples, n_points)
@@ -563,6 +580,7 @@ def fft_psd(
 
     n_samples, n_points = data.shape
 
+<<<<<<< HEAD
     # Determine if the grid is regular or unstructured
     unique_lats = np.unique(lats)
     unique_lons = np.unique(lons)
@@ -592,6 +610,26 @@ def fft_psd(
             data_3d[s] = griddata(points, data[s], (grid_lat, grid_lon), method="nearest")
 
     # Apply latitude mask
+=======
+    # Verify the grid is regular
+    unique_lats = np.unique(lats)
+    unique_lons = np.unique(lons)
+    nlat, nlon = len(unique_lats), len(unique_lons)
+
+    if nlat * nlon != n_points:
+        raise ValueError(
+            f"FFT PSD requires a regular lat-lon grid, but got {n_points} points "
+            f"with {nlat} unique latitudes and {nlon} unique longitudes "
+            f"(expected {nlat}×{nlon} = {nlat * nlon}). "
+            f"Use psd_method='sht' for non-regular grids."
+        )
+
+    # Reshape to (n_samples, nlat, nlon) — points are assumed ordered lat-major
+    data_3d = data.reshape(n_samples, nlat, nlon)
+
+    # Apply latitude mask
+    lat_axis = unique_lats
+>>>>>>> origin/develop-ssl-diffusion-v1
     lat_mask = (lat_axis >= lat_range[0]) & (lat_axis <= lat_range[1])
     data_3d = data_3d[:, lat_mask, :]
     nlon_sub = data_3d.shape[2]
@@ -602,7 +640,11 @@ def fft_psd(
         psds.append(_cubepsd(data_3d[s]))
     psd_result = np.mean(psds, axis=0)
 
+<<<<<<< HEAD
     spacing = 360.0 / nlon_sub if nlon_sub > 0 else regrid_resolution
+=======
+    spacing = 360.0 / nlon_sub if nlon_sub > 0 else 1.0
+>>>>>>> origin/develop-ssl-diffusion-v1
     frequencies = _calcposfreq(nlon_sub, spacing_deg=spacing)
     return frequencies, psd_result
 
@@ -619,7 +661,10 @@ def compute_psd_for_field(
     lats: np.typing.NDArray | None = None,
     lons: np.typing.NDArray | None = None,
     lat_range: tuple[float, float] = (-60.0, 60.0),
+<<<<<<< HEAD
     regrid_resolution: float = 1.0,
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
     sht_truncation: int | None = None,
     grid_type: str = "octahedral",
 ) -> tuple[np.typing.NDArray, np.typing.NDArray]:
@@ -637,8 +682,11 @@ def compute_psd_for_field(
         Latitude / longitude coordinate arrays (required for fft method).
     lat_range : tuple[float, float]
         Latitude bounds for the fft method.
+<<<<<<< HEAD
     regrid_resolution : float
         Grid spacing in degrees for the fft method.
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
     sht_truncation : int | None
         Spectral truncation for SHT.
     grid_type : str
@@ -668,7 +716,10 @@ def compute_psd_for_field(
             lats=lats,
             lons=lons,
             lat_range=lat_range,
+<<<<<<< HEAD
             regrid_resolution=regrid_resolution,
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
         )
     else:
         raise ValueError(f"Unknown PSD method: {method!r}. Use 'sht' or 'fft'.")
@@ -682,7 +733,10 @@ def compute_psd_score(
     nlat: int | None,
     n_points: int,
     psd_method: str = "sht",
+<<<<<<< HEAD
     psd_regrid_resolution: float = 1.0,
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
     psd_sht_truncation: int | None = None,
     lat_range: tuple[float, float] = (-60.0, 60.0),
     grid_type: str | None = None,
@@ -705,8 +759,11 @@ def compute_psd_score(
         Original number of spatial points (before NaN masking).
     psd_method : str
         ``"sht"`` or ``"fft"``.
+<<<<<<< HEAD
     psd_regrid_resolution : float
         Grid spacing for fft method.
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
     psd_sht_truncation : int | None
         Spectral truncation for SHT.
     lat_range : tuple[float, float]
@@ -766,7 +823,10 @@ def compute_psd_score(
             lats=lats_valid,
             lons=lons_valid,
             lat_range=lat_range,
+<<<<<<< HEAD
             regrid_resolution=psd_regrid_resolution,
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
             sht_truncation=psd_sht_truncation,
             grid_type=grid_type,
         )
@@ -777,7 +837,10 @@ def compute_psd_score(
             lats=lats_valid,
             lons=lons_valid,
             lat_range=lat_range,
+<<<<<<< HEAD
             regrid_resolution=psd_regrid_resolution,
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
             sht_truncation=psd_sht_truncation,
             grid_type=grid_type,
         )

@@ -7,6 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+<<<<<<< HEAD
+=======
+embed_orientation: "channels"
+>>>>>>> origin/develop-ssl-diffusion-v1
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
@@ -137,7 +141,11 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
+<<<<<<< HEAD
   num_mini_epochs: 56
+=======
+  num_mini_epochs: 64
+>>>>>>> origin/develop-ssl-diffusion-v1
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -203,7 +211,11 @@ validation_config:
   validate_with_ema: 
     enabled : True
     ema_ramp_up_ratio: 0.09
+<<<<<<< HEAD
     ema_halflife_in_thousands: 1e-3
+=======
+    ema_halflife_in_thousands: 600
+>>>>>>> origin/develop-ssl-diffusion-v1
 
   # parameters for validation samples that are written to disk
   output : {
@@ -222,7 +234,11 @@ validation_config:
 # test config; full test config is merge of validation and test config
 test_config: 
 
+<<<<<<< HEAD
   samples_per_mini_epoch: 128
+=======
+  samples_per_mini_epoch: 4096
+>>>>>>> origin/develop-ssl-diffusion-v1
   shuffle: False
 
   start_date: 2023-06-01T00:00
@@ -231,7 +247,11 @@ test_config:
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
+<<<<<<< HEAD
     num_samples: 128,
+=======
+    num_samples: 4096,
+>>>>>>> origin/develop-ssl-diffusion-v1
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all

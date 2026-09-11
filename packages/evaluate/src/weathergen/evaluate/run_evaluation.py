@@ -262,6 +262,15 @@ def _process_stream(
     if not needs_scoring:
         return run_id, stream, {}, {}
 
+<<<<<<< HEAD
+=======
+    plot_score_maps = plot_score_options.get("plot_score_maps", False) and type_ == "zarr"
+    plot_score_init_time_series = (
+        plot_score_options.get("plot_score_init_time_series", False) and type_ == "zarr"
+    )
+
+    stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
+>>>>>>> origin/develop-ssl-diffusion-v1
     scores_dict = stream_loaded_scores
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
@@ -326,12 +335,20 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
     metrics = cfg.evaluation.metrics
 
+<<<<<<< HEAD
     # backward-compatibility with old way of specifying plotting options (bools) instead of lists:
     # TODO: remove this in a few weeks once all users moved to the new style.
     with open_dict(cfg):
         parse_plot_config(cfg)
 
     plot_score_options = get_plot_score_options(cfg.evaluation)
+=======
+    plot_score_options = {
+        "plot_score_maps": cfg.evaluation.get("plot_score_maps", False),
+        "plot_score_animations": cfg.evaluation.get("plot_score_animations", False),
+        "plot_score_init_time_series": cfg.evaluation.get("plot_score_init_time_series", False),
+    }
+>>>>>>> origin/develop-ssl-diffusion-v1
 
     global_plotting_opts = cfg.get("global_plotting_options", {})
     default_streams = cfg.get("default_streams", {})

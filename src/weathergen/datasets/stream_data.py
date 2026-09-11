@@ -130,7 +130,14 @@ class StreamData:
 
         return self
 
-    def to_device(self, device: str) -> None:
+    def to_device(
+        self,
+        device: str,
+        target_steps: list[int] | None = None,
+        include_source: bool = True,
+        include_target_coords: bool = True,
+        include_target_tokens: bool = True,
+    ) -> None:
         """
         Move data to GPU
 
@@ -144,13 +151,19 @@ class StreamData:
         None
         """
 
+        target_steps = list(range(self.output_steps)) if target_steps is None else target_steps
         dv = device
-        self.target_coords = [t.to(dv, non_blocking=True) for t in self.target_coords]
-        self.target_coords_lens = [t.to(dv, non_blocking=True) for t in self.target_coords_lens]
-        self.target_tokens = [t.to(dv, non_blocking=True) for t in self.target_tokens]
+        for step in target_steps:
+            if include_target_coords:
+                self.target_coords[step] = self.target_coords[step].to(dv, non_blocking=True)
+                self.target_coords_lens[step] = self.target_coords_lens[step].to(
+                    dv, non_blocking=True
+                )
+            if include_target_tokens:
+                self.target_tokens[step] = self.target_tokens[step].to(dv, non_blocking=True)
 
         # move to device if source data is present
-        if not np.array([s is None for s in self.source_tokens_cells]).all():
+        if include_source and not np.array([s is None for s in self.source_tokens_cells]).all():
             self.source_tokens_cells = [
                 s.to(dv, non_blocking=True) for s in self.source_tokens_cells
             ]
@@ -159,6 +172,12 @@ class StreamData:
             self.source_idxs_embed = [s.to(dv, non_blocking=True) for s in self.source_idxs_embed]
 
         return self
+
+    def clear_target_coordinates(self, target_steps: list[int]) -> None:
+        """Release decoder coordinates for forecast steps that have been processed."""
+        for step in target_steps:
+            self.target_coords[step] = torch.empty(0)
+            self.target_coords_lens[step] = torch.empty(0, dtype=torch.int32)
 
     def add_source(
         self,
@@ -471,6 +490,14 @@ def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderD
     lons, lats = hp.healpix_to_lonlat(
         np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
     )
+<<<<<<< HEAD
+=======
+    coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
+    # spoof two tokens to avoid unnecessary computational load
+    coords = coords[np.random.choice(coords.shape[0], size=2, replace=False)]
+
+    geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
+>>>>>>> origin/develop-ssl-diffusion-v1
 
     coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
     # spoof two tokens to avoid unnecessary computational load

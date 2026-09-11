@@ -275,5 +275,9 @@ def needs_climatology(metrics_dict: dict) -> bool:
         True if any metric requires climatology, False otherwise
     """
     metrics = [m for metrics in metrics_dict.values() for m in metrics.keys()]
+<<<<<<< HEAD
     req_clim = ["acc", "rps", "rpss", "seeps"]
+=======
+    req_clim = ["acc", "rps", "rpss"]
+>>>>>>> origin/develop-ssl-diffusion-v1
     return any(m in req_clim for m in metrics)

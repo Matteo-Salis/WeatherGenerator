@@ -147,6 +147,7 @@ class Plotter:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
+        self.log_colorbar = plotter_cfg.get("log_colorbar", False)
         self.regions = plotter_cfg.get("regions")
         self.log_x = plotter_cfg.get("log_x", False)
         self.log_y = plotter_cfg.get("log_y", False)
@@ -672,7 +673,10 @@ class Plotter:
             "colors": kw.pop("colors", None),
             "use_datashader": kw.pop("use_datashader", False),
             "levels": kw.pop("levels", None),
+<<<<<<< HEAD
             "colorbar_scale": kw.pop("colorbar_scale", "linear"),
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
             # HEALPix grid
             "add_healpix_grid": kw.pop("add_healpix_grid", False),
             "healpix_nside": kw.pop("healpix_nside", 4),
@@ -1014,7 +1018,11 @@ class Plotter:
                 # If regionname isn't in the library, fall back to PlateCarree
                 _logger.warning(f"Region '{regionname}' not found in library, using PlateCarree.")
                 proj = ccrs.PlateCarree()
+<<<<<<< HEAD
         fig = plt.figure(figsize=figsize, dpi=self.dpi_val, constrained_layout=True)
+=======
+        fig = plt.figure(figsize=figsize, dpi=self.dpi_val)
+>>>>>>> origin/develop-ssl-diffusion-v1
         ax = fig.add_subplot(1, 1, 1, projection=proj)
         try:
             ax.coastlines(linewidth=0.3)
@@ -1033,9 +1041,23 @@ class Plotter:
                 if opts["vmax"] is None:
                     opts["vmax"] = float(p_hi)
 
+<<<<<<< HEAD
         # resolve cmap and norm based on options and tag
         opts["cmap"] = self._resolve_cmap(opts, tag)
         opts["norm"] = self._resolve_norm(opts, tag)
+=======
+        if isinstance(opts["levels"], oc.listconfig.ListConfig):
+            opts["norm"] = mpl.colors.BoundaryNorm(opts["levels"], opts["cmap"].N, extend="both")
+        elif self.log_colorbar and opts["vmin"] is not None and opts["vmin"] > 0:
+            opts["norm"] = mpl.colors.LogNorm(vmin=opts["vmin"], vmax=opts["vmax"])
+        else:
+            if self.log_colorbar:
+                _logger.warning(
+                    "log_colorbar=True but vmin=%.3g <= 0; falling back to linear norm.",
+                    opts["vmin"],
+                )
+            opts["norm"] = mpl.colors.Normalize(vmin=opts["vmin"], vmax=opts["vmax"], clip=False)
+>>>>>>> origin/develop-ssl-diffusion-v1
 
         if regionname == "global":
             ax.set_global()

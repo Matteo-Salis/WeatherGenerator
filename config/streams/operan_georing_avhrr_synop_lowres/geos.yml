@@ -11,6 +11,7 @@ METEOSAT_SEVIRI_IR :
   type : obs
   stream_id : 10
   filenames : ['observations-file-2014-2024-seviri-o256-wegen-v3.zarr']
+<<<<<<< HEAD
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
   loss_weight : 1.0
   location_weight : cosine_latitude
@@ -19,6 +20,19 @@ METEOSAT_SEVIRI_IR :
       masking_strategy: "random"
       masking_strategy_config :
         rate: 1.0
+=======
+  # source_exclude : ['obsvalue_rawbt_620', 'obsvalue_rawbt_730']
+  target : []
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
+  loss_weight : 1.0
+  location_weight : cosine_latitude
+  # masking_override :
+  #   model_input :
+  #     masking_strategy: 'random'
+  #     masking_strategy_config :
+  #       # rate: 1.0
+  #       rate: 0.5
+>>>>>>> origin/develop-ssl-diffusion-v1
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
@@ -44,6 +58,7 @@ GOES_ABI_IR :
   type : obs
   stream_id : 11
   filenames : ['observations-file-2017-2024-abi-goes16-IR-o256-v2.zarr']
+<<<<<<< HEAD
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day','zenith', 'cos_sza']
   loss_weight : 1.0
   location_weight : cosine_latitude
@@ -52,6 +67,19 @@ GOES_ABI_IR :
       masking_strategy: "random"
       masking_strategy_config :
         rate: 1.0
+=======
+  # source_exclude : ['obsvalue_rawbt_620', 'obsvalue_rawbt_730']
+  target : []
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day','zenith', 'cos_sza']
+  loss_weight : 1.0
+  location_weight : cosine_latitude
+  # masking_override :
+  #   model_input :
+  #     masking_strategy: 'random'
+  #     masking_strategy_config :
+  #       # rate: 1.0
+  #       rate: 0.5
+>>>>>>> origin/develop-ssl-diffusion-v1
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
@@ -77,6 +105,7 @@ HIMAWARI_AHI_IR :
   type : obs
   stream_id : 12
   filenames : ['observations-file-2015-2022-himawari8-IR-o256-v1.zarr', 'observations-file-2022-2024-himawari9-IR-o256-v1.zarr']
+<<<<<<< HEAD
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
   loss_weight : 1.0
   location_weight : cosine_latitude
@@ -85,6 +114,19 @@ HIMAWARI_AHI_IR :
       masking_strategy: "random"
       masking_strategy_config :
         rate: 1.0
+=======
+  # source_exclude : ['obsvalue_rawbt_620', 'obsvalue_rawbt_730']
+  target : []
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
+  loss_weight : 1.0
+  location_weight : cosine_latitude
+  # masking_override :
+  #   model_input :
+  #     masking_strategy: 'random'
+  #     masking_strategy_config :
+  #       # rate: 1.0
+  #       rate: 0.5
+>>>>>>> origin/develop-ssl-diffusion-v1
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
@@ -110,15 +152,28 @@ GOES_ABI_VIS :
   type : obs
   stream_id : 13
   filenames : ['observations-file-2017-2024-abi-goes16-VIS-o256-v2.zarr']
+<<<<<<< HEAD
+=======
+  target : []
+>>>>>>> origin/develop-ssl-diffusion-v1
   # geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
   geoinfo_channels : ['zenith']
   loss_weight : 1.0
   location_weight : cosine_latitude
+<<<<<<< HEAD
   masking_override :
     model_input :
       masking_strategy: "random"
       masking_strategy_config :
         rate: 1.0
+=======
+  # masking_override :
+  #   model_input :
+  #     masking_strategy: 'random'
+  #     masking_strategy_config :
+  #       # rate: 1.0
+  #       rate: 0.5
+>>>>>>> origin/develop-ssl-diffusion-v1
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
@@ -144,15 +199,28 @@ HIMAWARI_AHI_VIS :
   type : obs
   stream_id : 14
   filenames : ['observations-file-2015-2022-himawari8-VIS-o256-v1.zarr', 'observations-file-2022-2024-himawari9-VIS-o256-v1.zarr']
+<<<<<<< HEAD
+=======
+  target : []
+>>>>>>> origin/develop-ssl-diffusion-v1
   # geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
   geoinfo_channels : ['zenith']
   loss_weight : 1.0
   location_weight : cosine_latitude
+<<<<<<< HEAD
   masking_override :
     model_input :
       masking_strategy: "random"
       masking_strategy_config :
         rate: 1.0
+=======
+  # masking_override :
+  #   model_input :
+  #     masking_strategy: 'random'
+  #     masking_strategy_config :
+  #       # rate: 1.0
+  #       rate: 0.5
+>>>>>>> origin/develop-ssl-diffusion-v1
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072

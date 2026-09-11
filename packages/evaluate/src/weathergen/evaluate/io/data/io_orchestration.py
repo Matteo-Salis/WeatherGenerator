@@ -78,17 +78,24 @@ class IOState:
     lat: NDArray
     lon: NDArray
     n_workers: int
+<<<<<<< HEAD
     regridder: Regridder | None = None  # shared Regridder instance (caches matrices + opts)
+=======
+    regrid_opts: dict  # options for regridding gridded DataArrays; ignored for scatter
+>>>>>>> origin/develop-ssl-diffusion-v1
     backend: str = "loky"
     rank: str = "0000"
     offset: np.timedelta64 | None = (
         None  # fallback offset in hours for init_time when source_interval is missing
     )
+<<<<<<< HEAD
     sample_labels: list[int] | None = None  # global sample indices for coordinate labeling
 
     def get_sample_labels(self) -> list[int]:
         """Return global sample labels (falls back to local samples if not set)."""
         return self.sample_labels if self.sample_labels is not None else self.samples
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +267,10 @@ def build_io_state(
     n_io_workers: int,
     ens_select: EnsembleSelect,
     rank: str = "",
+<<<<<<< HEAD
     sample_labels: list[int] | None = None,
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
 ) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
     zarr_path = str(fname_zarr)
@@ -285,8 +295,11 @@ def build_io_state(
     if isinstance(regrid_opts, bool) and regrid_opts:
         regrid_opts = {"target_grid": [1.5, 1.5]}
 
+<<<<<<< HEAD
     regridder = Regridder(regrid_opts) if regrid_opts else None
 
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
     return IOState(
         run_id=run_id,
         zarr_path=zarr_path,
@@ -307,8 +320,12 @@ def build_io_state(
         n_workers=n_io_workers,
         rank=rank,
         offset=offset,
+<<<<<<< HEAD
         regridder=regridder,
         sample_labels=sample_labels,
+=======
+        regrid_opts=regrid_opts,
+>>>>>>> origin/develop-ssl-diffusion-v1
     )
 
 
@@ -324,6 +341,7 @@ def _parallel_read(
     n_workers: int,
     backend: str,
     label: str,
+    regrid_opts: dict,
 ) -> tuple[list, bool]:
     """Dispatch _read_sample over samples, with parallel→sequential fallback.
 
@@ -341,6 +359,7 @@ def _parallel_read(
         is_zip=is_zip,
         read_coords=need_coords,
         is_gridded=is_gridded,
+        regrid_opts=regrid_opts,
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
@@ -442,8 +461,12 @@ def _assemble_substep(
             init_times,
             forecast_step_val,
             state.ens_select,
+<<<<<<< HEAD
             regridder=state.regridder,
             run_id=state.run_id,
+=======
+            regrid_opts=state.regrid_opts,
+>>>>>>> origin/develop-ssl-diffusion-v1
         )
     else:
         # meta["coords"] is a list[NDArray | None] with one entry per fstep.
@@ -558,6 +581,10 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             n_workers=n_workers,
             backend=state.backend,
             label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
+<<<<<<< HEAD
+=======
+            regrid_opts=state.regrid_opts,
+>>>>>>> origin/develop-ssl-diffusion-v1
         )
         # If _parallel_read fell back to sequential, honour that for the rest
         if fell_back:
@@ -618,8 +645,12 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     _logger.info(
         f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
         f"Loading {len(state.samples)} samples × "
+<<<<<<< HEAD
         f"{len(state.fsteps)} windows = {n_total} items \n"
         f"via ZipStore-parallel zarr I/O "
+=======
+        f"{len(state.fsteps)} fsteps = {n_total} items via ZipStore-parallel zarr I/O "
+>>>>>>> origin/develop-ssl-diffusion-v1
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
 
@@ -631,6 +662,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         is_zip=state.is_zip,
         read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
+        regrid_opts=state.regrid_opts,
     )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)
@@ -705,7 +737,11 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     if state.n_workers > 1:
         get_reusable_executor().shutdown(wait=True)
 
+<<<<<<< HEAD
     _logger.debug(
+=======
+    _logger.info(
+>>>>>>> origin/develop-ssl-diffusion-v1
         f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: ZipStore-parallel I/O complete. "
         f"{len(da_tars_dict)} forecast entries loaded."
     )

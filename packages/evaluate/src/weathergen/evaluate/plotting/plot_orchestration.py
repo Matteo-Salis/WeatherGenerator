@@ -26,7 +26,10 @@ from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.bar_plots import BarPlots
 from weathergen.evaluate.plotting.line_plots import LinePlots
+<<<<<<< HEAD
 from weathergen.evaluate.plotting.pdf_merge import merge_pdf_subdirectories
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
 from weathergen.evaluate.plotting.plot_orchestration_utils import (
     _compute_ranges,
     _compute_scores,
@@ -49,7 +52,10 @@ from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
+<<<<<<< HEAD
 from weathergen.evaluate.utils.regions import RegionBoundingBox
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
 
 _logger = logging.getLogger(__name__)
 
@@ -113,9 +119,12 @@ def run_score_timeseries_pipeline(
         max_workers=reader.eval_cfg.get("max_workers", None),
     )
 
+<<<<<<< HEAD
     needs_clim = needs_climatology(metrics_dict)
     aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
 
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
     # --- Parallel score computation across (region, fstep) pairs ---
     score_tasks: list[dict] = []
     for fstep in fsteps:
@@ -134,6 +143,7 @@ def run_score_timeseries_pipeline(
         )
         preds_with_hour = preds_fs.assign_coords(source_end_hour=source_end_hour)
         tars_with_hour = tars_fs.assign_coords(source_end_hour=source_end_hour)
+<<<<<<< HEAD
         # get_score groups every DataArray argument, so the climatology is grouped too.
         clim_with_hour = (
             aligned_clim_data[fstep].assign_coords(source_end_hour=source_end_hour)
@@ -156,17 +166,29 @@ def run_score_timeseries_pipeline(
             tars_r = bbox.apply_mask(tars_with_hour)
             if preds_r.sizes.get("ipoint") == 0:
                 continue
+=======
+
+        for region in regions:
+            region_metrics = metrics_dict.get(region)
+            metric_names = list(region_metrics.keys())
+            metric_params = list(region_metrics.values())
+>>>>>>> origin/develop-ssl-diffusion-v1
             score_tasks.append(
                 dict(
                     fstep=fstep,
                     region=region,
                     metric_names=metric_names,
                     metric_params=metric_params,
+<<<<<<< HEAD
                     preds_with_hour=preds_r,
                     tars_with_hour=tars_r,
                     clim_with_hour=(
                         bbox.apply_mask(clim_with_hour) if clim_with_hour is not None else None
                     ),
+=======
+                    preds_with_hour=preds_with_hour,
+                    tars_with_hour=tars_with_hour,
+>>>>>>> origin/develop-ssl-diffusion-v1
                     unique_hours=unique_hours,
                 )
             )
@@ -202,7 +224,10 @@ def _compute_timeseries_scores_for_fstep(
     metric_params: list,
     preds_with_hour: xr.DataArray,
     tars_with_hour: xr.DataArray,
+<<<<<<< HEAD
     clim_with_hour: xr.DataArray | None,
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
     unique_hours: list[int],
 ) -> tuple[int, str, dict[str, xr.DataArray]]:
     """Compute grouped scores for one (region, fstep) pair (parallelisable worker).
@@ -215,7 +240,11 @@ def _compute_timeseries_scores_for_fstep(
     metric_scores: dict[str, xr.DataArray] = {}
     for metric_name, parameters in zip(metric_names, metric_params, strict=False):
         score = get_score(
+<<<<<<< HEAD
             VerifiedData(preds_with_hour, tars_with_hour, None, None, clim_with_hour),
+=======
+            VerifiedData(preds_with_hour, tars_with_hour, None, None, None),
+>>>>>>> origin/develop-ssl-diffusion-v1
             metric_name,
             agg_dims=agg_dims,
             group_by_coord=group_by_coord,
@@ -303,8 +332,14 @@ def run_score_map_pipeline(
         "image_format": cfg.get("image_format", "png"),
         "dpi_val": cfg.get("dpi_val", 300),
         "fig_size": cfg.get("fig_size", None),
+<<<<<<< HEAD
         "animation_format": cfg.get("animation_format", "mp4"),
         "fps": cfg.get("fps", 2),
+=======
+        "animation_format": cfg.get("animation_format", "gif"),
+        "fps": cfg.get("fps", 2),
+        "log_colorbar": cfg.get("log_colorbar", False),
+>>>>>>> origin/develop-ssl-diffusion-v1
     }
     output_basedir = str(reader.runplot_dir)
     run_id = reader.run_id
@@ -378,9 +413,15 @@ def _plot_score_maps_per_stream(
 
     score_results, preds, metric_names = computed
     valid = [
+<<<<<<< HEAD
         (metric, result)
         for metric, result in zip(metric_names, score_results, strict=False)
         if result is not None and "ipoint" in result.dims
+=======
+        (m, r)
+        for m, r in zip(metric_names, score_results, strict=False)
+        if r is not None and "ipoint" in r.dims
+>>>>>>> origin/develop-ssl-diffusion-v1
     ]
     if not valid:
         return
@@ -685,6 +726,7 @@ def _dispatch_score_map_animations(
     return [p for r in results if r for p in r]
 
 
+<<<<<<< HEAD
 # ---------------------------------------------------------------------------
 # Timeseries plots
 # ---------------------------------------------------------------------------
@@ -729,6 +771,8 @@ def _dispatch_timeseries_plots(
     )
 
 
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
 # ---------------------------------------------------------------------------
 # Per-sample map / histogram plots
 # ---------------------------------------------------------------------------
@@ -1309,6 +1353,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
 
     for metric in metrics:
         for region in scores_dict[metric].keys():
+<<<<<<< HEAD
             # Set metric/region subdirectory for all plotters
             plotter.set_subdir(metric, region)
             sc_plotter.set_subdir(metric, region)
@@ -1327,6 +1372,16 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 else:
                     plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if do_ratio:
+=======
+            if eval_opt.get("summary_plots", False):
+                if metric == "psd":
+                    psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                elif metric == "qq_analysis":
+                    quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
+                else:
+                    plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("ratio_plots", False):
+>>>>>>> origin/develop-ssl-diffusion-v1
                 ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if do_heatmap:
                 heat_maps_metric_region(metric, region, runs, scores_dict, plotter)
@@ -1334,6 +1389,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if do_bar:
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
+<<<<<<< HEAD
 
     # Merge individual PDFs into combined documents for easier browsing
     if plot_cfg["image_format"] == "pdf":
@@ -1344,3 +1400,5 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
             for subdir in subdirs
         ]
         merge_pdf_subdirectories(output_basedir, run_ids=list(runs.keys()), subdirs=enabled_subdirs)
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1

@@ -553,6 +553,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
     def _merge_fsteps(self, all_das: dict, global_sample_coords) -> dict:
         """Merge lists of DataArrays for each forecast step across ranks.
+<<<<<<< HEAD
 
         For gridded data (dims include 'sample'), concatenates along 'sample'
         and re-indexes to global sample coordinates.
@@ -608,6 +609,18 @@ class WeatherGenZarrReader(WeatherGenReader):
             da = da.drop_vars("sample").assign_coords(sample=("ipoint", np.full(n_ip, sample_val)))
         return da
 
+=======
+        Concatenates along the sample dimension and re-indexes to global samples.
+        """
+        merged = {}
+        for fstep, das in all_das.items():
+            combined = xr.concat(das, dim="sample") if len(das) > 1 else das[0]
+            merged[fstep] = combined.assign_coords(
+                sample=global_sample_coords[: len(combined.sample)]
+            )
+        return merged
+
+>>>>>>> origin/develop-ssl-diffusion-v1
     def get_data(
         self,
         stream: str,
@@ -661,7 +674,10 @@ class WeatherGenZarrReader(WeatherGenReader):
             rank_local_to_load = [
                 local_samples[g - global_offset] for g in sorted(rank_globals & requested_globals)
             ]
+<<<<<<< HEAD
             rank_global_labels = sorted(rank_globals & requested_globals)
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
 
             _logger.info(
                 f"RUN {self.run_id} [rank {rank_file.stem.split('rank')[-1]}]: "
@@ -673,7 +689,11 @@ class WeatherGenZarrReader(WeatherGenReader):
                 f"global samples {sorted(rank_globals & requested_globals)}"
             )
 
+<<<<<<< HEAD
             state = build_io_state(
+=======
+            state = _build_io_state(
+>>>>>>> origin/develop-ssl-diffusion-v1
                 self.run_id,
                 rank_file,
                 stream,
@@ -687,7 +707,10 @@ class WeatherGenZarrReader(WeatherGenReader):
                 self._num_io_workers,
                 ens_select,
                 rank=rank_file.stem.split("rank")[-1],
+<<<<<<< HEAD
                 sample_labels=rank_global_labels,
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
             )
             get_data_fn = get_data_zipstore if state.is_zip else get_data_dirstore
             result = get_data_fn(state)
@@ -708,7 +731,10 @@ class WeatherGenZarrReader(WeatherGenReader):
         _logger.info(
             f"RUN {self.run_id}: Multi-rank load complete. "
             f"{len(global_sample_coords)} samples × {len(merged_targets)} fsteps "
+<<<<<<< HEAD
             f"(including sub-steps) "
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
             f"from {ranks_loaded}/{len(self.rank_files)} ranks "
             f"({ranks_skipped} skipped)."
         )
@@ -791,6 +817,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         """is_gridded_data logic, called once per stream and cached."""
         _logger.debug(f"Checking regular spacing for stream {stream}...")
 
+<<<<<<< HEAD
         max_num_target = self.get_inference_stream_attr(stream, "max_num_targets", -1)
         if max_num_target != -1:
             _logger.warning(
@@ -799,6 +826,8 @@ class WeatherGenZarrReader(WeatherGenReader):
             )
             return False
 
+=======
+>>>>>>> origin/develop-ssl-diffusion-v1
         with self._open_any_rank_for_metadata() as zio:
             dummy = zio.get_data(zio.samples[0], stream, zio.forecast_steps[0])
 
