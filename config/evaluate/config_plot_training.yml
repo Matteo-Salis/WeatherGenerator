@@ -1,42 +1,7 @@
 train:
   plot:
     
-    # mvphslyf:
-    #     slurm_id : 0
-    #     description: "CERRA coord hack 3h-6h - 1fstep - E128"
-    #     color: "tab:blue"
-    
-    akmqbd3l:
+    k3hn4tje:
         slurm_id : 0
-        description: "CERRA rel coord 3h-3h - ema 1e-3"
-        color: "tab:red"
-
-    h0hcwbum:
-        slurm_id : 0
-        description: "CERRA abs hack 3h-3h - ema 600"
-        color: "tab:orange"
-    xiynjep9:
-        slurm_id : 0
-        description: "Resumed"
-        color: "tab:orange"
-
-    tnjpexsk:
-        slurm_id : 0
-        description: "CERRA abs hack 3h-3h - ema 1e-3"
+        description: "6h"
         color: "tab:blue"
-    yidjxc2c :
-        slurm_id : 0
-        description: "CERRA abs config 3h-3h - ema 1e-3"
-
-    p26cps15:
-        slurm_id : 0
-        description: "CERRA abs hack 3h-3h - ema 1e-3 - C.L. decoder"
-
-    jkjj7c90:
-        slurm_id : 0
-        description: "CERRA abs hack 3h-3h - unembed block - ema 1e-3"
-        color: "tab:purple"
-    
-    iksjizv6:
-        slurm_id : 0
-        description: "CERRA abs hack 3h-3h - ext fields - ema 1e-3"

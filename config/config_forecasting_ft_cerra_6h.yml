@@ -12,7 +12,7 @@ embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 2048
-ae_local_num_blocks: 0
+ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -84,7 +84,8 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*fe.*|.*ERA5.*"
+freeze_modules: ".*global.*|.*q_cells.*|.*latent.*|.*fe.*|.*ERA5.*"
+#".*encoder.*|.*q_cells.*|.*latent.*|.*fe.*|.*ERA5.*"
 load_chkpt: {}
 
 norm_type: "LayerNorm"
@@ -106,7 +107,7 @@ general:
   world_size: ???
 
   # local_rank, 
-  # with_ddp,
+  with_ddp: True
   # data_path_*, 
   # model_path, 
   # run_path, 
@@ -145,8 +146,8 @@ training_config:
   start_date: 1985-01-01T00:00
   end_date: 2022-12-31T00:00
 
-  time_window_step: 03:00:00
-  time_window_len: 03:00:00
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
   
   learning_rate_scheduling :
     lr_start: 1e-6
@@ -185,7 +186,7 @@ training_config:
     }
 
   forecast :
-      time_step: 03:00:00
+      time_step: 06:00:00
       offset: 1
       num_steps: 1
       policy: "fixed"

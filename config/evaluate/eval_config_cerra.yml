@@ -69,18 +69,10 @@ run_ids :
       #     color: "tab:pink"
       #     rank: "all"
 
-      yapr5xlh:
-          label: "ae_global_dim_embed: 4096 - 2.84 B"
-          color: "tab:brown"
-          rank: "all"
+      
 
-      p23os14y:
-          label: "ae_global_num_blocks: 8 + ae_global_dim_embed: 4096  - 3.38 B"
-          color: "tab:olive"
-          rank: "all"
-
-      gtkim87u:
-          label: "HLP 6"
+      bl5qvzk6:
+          label: "time_step 6h"
           color: "tab:cyan"
           rank: "all"
 

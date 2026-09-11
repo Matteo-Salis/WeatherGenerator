@@ -106,7 +106,7 @@ general:
   world_size: ???
 
   # local_rank, 
-  # with_ddp,
+  with_ddp: True
   # data_path_*, 
   # model_path, 
   # run_path, 
