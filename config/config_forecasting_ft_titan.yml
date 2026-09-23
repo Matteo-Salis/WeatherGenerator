@@ -84,7 +84,7 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*fe.*|.*ERA5.*"
+freeze_modules: ".*global.*|.*q_cells.*|.*latent.*|.*fe.*|.*ERA5.*"
 load_chkpt: {}
 
 norm_type: "LayerNorm" 
