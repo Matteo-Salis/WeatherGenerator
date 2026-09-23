@@ -1,7 +1,44 @@
 train:
   plot:
     
-    k3hn4tje:
+    g1c841zm:
         slurm_id : 0
-        description: "6h"
+        description: "dim_embed: 512 - num_layers : 2 - num_heads : 4"
         color: "tab:blue"
+
+    jq1l9frv:
+        slurm_id : 0
+        description: "dim_embed: 512 - num_layers : 2 - num_heads : 8"
+        color: "tab:purple"
+    
+    ptre42ak:
+        slurm_id : 0
+        description: "dim_embed: 512 - num_layers : 4 - num_heads : 4"
+        color: "tab:cyan"
+    
+    frlx7egq:
+        slurm_id : 0
+        description: "dim_embed: 512 - num_layers : 4 - num_heads : 8"
+        color: "tab:green"
+
+
+    actvxaxd:
+        slurm_id : 0
+        description: "dim_embed: 1024 - num_layers : 2 - num_heads : 4"
+        color: "tab:orange"
+
+    n4q5184j:
+        slurm_id : 0
+        description: "dim_embed: 1024 - num_layers : 2 - num_heads : 8"
+        color: "tab:red"
+    
+    b0441y19:
+        slurm_id : 0
+        description: "dim_embed: 1024 - num_layers : 4 - num_heads : 4"
+        color: "tab:brown"
+    
+    l5bz7fo9:
+        slurm_id : 0
+        description: "dim_embed: 1024 - num_layers : 4 - num_heads : 8"
+        color: "tab:olive"
+

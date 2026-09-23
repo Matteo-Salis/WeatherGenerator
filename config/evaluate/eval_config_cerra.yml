@@ -22,7 +22,7 @@ evaluation:
   
 default_streams:
   CERRA:
-    channels: ["2t", "msl", "r_850", "t_850", "u_850", "v_850", "z_850"] #, "blah"]
+    channels: ['10si', 'r_850'] #, "blah"] #["2t", "msl", "r_850", "t_850", "u_850", "v_850", "z_850"] #
     evaluation:
       forecast_step: "all"
       sample: "all"
@@ -39,44 +39,29 @@ default_streams:
       
 run_ids :
 
-      # ja0bdtgl:
-      #   label: "CERRA abs coord 3h-3h - baseline - e128"
-      #   color: "tab:red"
-      #   rank: "all"
-
-      # hkzxrtmh:
-      #     label: "CERRA abs coord 3h-3h - baseline - e256"
+      # kcxgtv5v:
+      #     label: "I: ERA - O:CERRA "
       #     color: "tab:blue"
       #     rank: "all"
-
-      # zgz7zx6p:
-      #     label: "Alternative pe_global - 128"
-      #     color: "tab:orange"
-      #     rank: "all"
-
-      # jcoxmlug:
-      #     label: "Alternative pe_global - 256"
+      # dt365rog:
+      #     label: "I: ERA - O:CERRA - ft from 2016-01-01"
       #     color: "tab:green"
       #     rank: "all"
-
-      # nr09wzac:
-      #     label: "ae_global_num_blocks: 8 - 0.897 B"
-      #     color: "tab:purple"
+      # sref67hi:
+      #     label: "I: ERA - O:CERRA - dim_embed: 1024"
+      #     color: "tab:orange"
       #     rank: "all"
-
-      # cn4rk8qv:
-      #     label: "Increased ae_global_num_blocks: 16 - 1.16B "
-      #     color: "tab:pink"
+      # kqv7rvey:
+      #     label: "I: ERA+CERRA - O:CERRA "
+      #     color: "tab:red"
       #     rank: "all"
-
       
-
-      bl5qvzk6:
-          label: "time_step 6h"
-          color: "tab:cyan"
+      wn4r44o7:
+          label: "dim_embed: 1024 - num_layers : 4 - num_heads : 8"
+          color: "tab:blue"
           rank: "all"
-
-      # p4zy2yt4:
-      #     label: "CERRA abs hack 3h-3h - ema 1e-3 - C.L. decoder"
-      #     color: "tab:brown"
-      #     rank: "all"
+      
+      qnbltz0n:
+          label: "dim_embed: 1024 - num_layers : 2 - num_heads : 4"
+          color: "tab:green"
+          rank: "all"
