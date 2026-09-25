@@ -35,6 +35,7 @@ from weathergen.datasets.utils import (
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
+import sys 
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -78,8 +79,18 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
         rdata = (
             get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords_and_geoinfos()
         )
+        
+        np.save(f"/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_geoinfos_{type}_clds.npy", rdata.geoinfos)
+        np.save(f"/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_coords_{type}_clds.npy", rdata.coords)
+        
         rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
+        
+        np.save(f"/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_geoinfos_norm_{type}_clds.npy", rdata.geoinfos)
+        
+        # if type == "target":
+        #     sys.exit()
+        
         rdatas += [rdata]
 
     return IOReaderData.combine(rdatas)
