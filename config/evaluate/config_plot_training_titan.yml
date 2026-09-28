@@ -1,0 +1,12 @@
+train:
+  plot:
+    
+    sx0p6e82:
+        slurm_id : 0
+        description: "Titan ft atmofs03 - target all variables"
+        color: "tab:blue"
+
+    xjidp8jl:
+        slurm_id : 0
+        description: "Titan ft atmofs03 - target 7 variables"
+        color: "tab:purple"
