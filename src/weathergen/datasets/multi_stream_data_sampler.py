@@ -80,13 +80,13 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
             get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords_and_geoinfos()
         )
         
-        np.save(f"/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_geoinfos_{type}_clds.npy", rdata.geoinfos)
-        np.save(f"/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_coords_{type}_clds.npy", rdata.coords)
+        # np.save(f"/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_geoinfos_{type}_clds.npy", rdata.geoinfos)
+        # np.save(f"/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_coords_{type}_clds.npy", rdata.coords)
         
         rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
         
-        np.save(f"/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_geoinfos_norm_{type}_clds.npy", rdata.geoinfos)
+        # np.save(f"/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_geoinfos_norm_{type}_clds.npy", rdata.geoinfos)
         
         # if type == "target":
         #     sys.exit()

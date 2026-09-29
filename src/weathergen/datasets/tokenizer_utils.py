@@ -360,16 +360,16 @@ def tokenize_apply_mask_target(
     datetimes = np.atleast_1d(rdata.datetimes[idxs_data])
     datetimes_enc = enc_time(datetimes, time_win)
     geoinfos = rdata.geoinfos[idxs_data]
-    print(f"*** rdata.coords.shape: {rdata.coords.shape}")
-    print(f"*** idxs_data.shape: {idxs_data.shape}")
-    print(f"*** rdata.coords: {rdata.coords[:5,:]}")
+    # print(f"*** rdata.coords.shape: {rdata.coords.shape}")
+    # print(f"*** idxs_data.shape: {idxs_data.shape}")
+    # print(f"*** rdata.coords: {rdata.coords[:5,:]}")
     rdata_coords = rdata.coords.detach().cpu().numpy()
     idxs_data_np = idxs_data.detach().cpu().numpy()
     geoinfos_data = rdata.geoinfos.detach().cpu().numpy()
     
-    np.save("/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_geoinfos_tamt.npy", geoinfos_data)
-    np.save("/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_coords_tamt.npy", rdata_coords)
-    np.save("/users/msalis/project/weather_generator/export/test/debug_files/era5_idxs_tamt.npy", idxs_data_np)
+    # np.save("/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_geoinfos_tamt.npy", geoinfos_data)
+    # np.save("/users/msalis/project/weather_generator/export/test/debug_files/era5_rdata_coords_tamt.npy", rdata_coords)
+    # np.save("/users/msalis/project/weather_generator/export/test/debug_files/era5_idxs_tamt.npy", idxs_data_np)
 
     #sys.exit()
     
@@ -450,29 +450,29 @@ def get_target_coords_local(
 
     # target_coords_lens = [len(t) for t in target_coords]
     # tcs, target_coords = tcs_optimized(target_coords)
-    print(f"*** coords.shape: {coords.shape}")
+    # print(f"*** coords.shape: {coords.shape}")
     std_coords = theta_phi_to_standard_coords(coords)
-    print(f"*** std_coords.len_shape: {len(std_coords), std_coords[0].shape, std_coords[1].shape}")
+    # print(f"*** std_coords.len_shape: {len(std_coords), std_coords[0].shape, std_coords[1].shape}")
     target_coords = s2tor3(*std_coords) #x, y, and z
-    print(f"*** target_coords.shape: {target_coords.shape}")
-    print(f"*** target_coords: {target_coords[:5,:]}")
+    # print(f"*** target_coords.shape: {target_coords.shape}")
+    # print(f"*** target_coords: {target_coords[:5,:]}")
     # plot
     target_coords_data = target_coords.detach().cpu().numpy()
     
-    np.save("/users/msalis/project/weather_generator/export/test/debug_files/era5_target_coords_gtcl.npy", target_coords_data)
-    sys.exit()
+    # np.save("/users/msalis/project/weather_generator/export/test/debug_files/era5_target_coords_gtcl.npy", target_coords_data)
+    # sys.exit()
     
-    plt.figure(figsize=(5, 5))
-    plt.scatter(target_coords_data[:,1], target_coords_data[:,0],
-                c = target_coords_data[:,2],
-                s = 0.5,
-                )  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
-    plt.colorbar(label = "Z")  # Add a colorbar to show the scale
-    plt.ylabel("X")
-    plt.xlabel("Y")
-    plt.title("target_coords - Cartesian R^3 coords")
-    plt.tight_layout()
-    plt.savefig("/users/msalis/project/weather_generator/export/test/target_coords_yxz_375k_s5_vir.jpg", dpi = 600)
+    # plt.figure(figsize=(5, 5))
+    # plt.scatter(target_coords_data[:,1], target_coords_data[:,0],
+    #             c = target_coords_data[:,2],
+    #             s = 0.5,
+    #             )  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+    # plt.colorbar(label = "Z")  # Add a colorbar to show the scale
+    # plt.ylabel("X")
+    # plt.xlabel("Y")
+    # plt.title("target_coords - Cartesian R^3 coords")
+    # plt.tight_layout()
+    # plt.savefig("/users/msalis/project/weather_generator/export/test/target_coords_yxz_375k_s5_vir.jpg", dpi = 600)
     
     # plt.figure(figsize=(5, 5))
     # plt.scatter(target_coords_data[:,1], target_coords_data[:,2],
@@ -499,40 +499,40 @@ def get_target_coords_local(
             1 + target_geoinfos.shape[1] + target_times.shape[1] + 5 * (3 * 5) + 3 * 8,
         ]
     )
-    print(f"*** a.shape before assignment: {a.shape}")
-    print(f"*** target_times.shape: {target_times.shape}")
-    print(f"*** target_times: {target_times[:5,:]}")
-    print(f"*** target_geoinfos.shape: {target_geoinfos.shape}")
-    print(f"*** target_geoinfos: {target_geoinfos[:5,:]}")
+    # print(f"*** a.shape before assignment: {a.shape}")
+    # print(f"*** target_times.shape: {target_times.shape}")
+    # print(f"*** target_times: {target_times[:5,:]}")
+    # print(f"*** target_geoinfos.shape: {target_geoinfos.shape}")
+    # print(f"*** target_geoinfos: {target_geoinfos[:5,:]}")
     
-    target_geoinfos_data = target_geoinfos.detach().cpu().numpy()
-    np.save("/users/msalis/project/weather_generator/export/test/target_geoinfos_data.npy", target_geoinfos_data)
+    # target_geoinfos_data = target_geoinfos.detach().cpu().numpy()
+    # np.save("/users/msalis/project/weather_generator/export/test/target_geoinfos_data.npy", target_geoinfos_data)
     
-    plt.figure(figsize=(5, 5))
-    plt.scatter(target_coords_data[:,1], target_coords_data[:,0],
-                c = target_geoinfos_data[:,-2],
-                s = 0.5,
-                )  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
-    plt.colorbar(label = "sin_lat")  # Add a colorbar to show the scale
-    plt.ylabel("X")
-    plt.xlabel("Y")
-    plt.title("sin_lat - Cartesian R^3 coords")
-    plt.tight_layout()
-    plt.savefig("/users/msalis/project/weather_generator/export/test/Coords_sin-lat_yx_375k_s5_vir.jpg", dpi = 600)
+    # plt.figure(figsize=(5, 5))
+    # plt.scatter(target_coords_data[:,1], target_coords_data[:,0],
+    #             c = target_geoinfos_data[:,-2],
+    #             s = 0.5,
+    #             )  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+    # plt.colorbar(label = "sin_lat")  # Add a colorbar to show the scale
+    # plt.ylabel("X")
+    # plt.xlabel("Y")
+    # plt.title("sin_lat - Cartesian R^3 coords")
+    # plt.tight_layout()
+    # plt.savefig("/users/msalis/project/weather_generator/export/test/Coords_sin-lat_yx_375k_s5_vir.jpg", dpi = 600)
     
-    plt.figure(figsize=(5, 5))
-    plt.scatter(target_coords_data[:,1], target_coords_data[:,0],
-                c = target_geoinfos_data[:,-1],
-                s = 0.5,
-                )  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
-    plt.colorbar(label = "sin_lon")  # Add a colorbar to show the scale
-    plt.ylabel("X")
-    plt.xlabel("Y")
-    plt.title("sin_lon - Cartesian R^3 coords")
-    plt.tight_layout()
-    plt.savefig("/users/msalis/project/weather_generator/export/test/Coords_sin-lon_yx_375k_s5_vir.jpg", dpi = 600)
+    # plt.figure(figsize=(5, 5))
+    # plt.scatter(target_coords_data[:,1], target_coords_data[:,0],
+    #             c = target_geoinfos_data[:,-1],
+    #             s = 0.5,
+    #             )  # Choose a colormap (e.g., 'viridis', 'hot', 'plasma')
+    # plt.colorbar(label = "sin_lon")  # Add a colorbar to show the scale
+    # plt.ylabel("X")
+    # plt.xlabel("Y")
+    # plt.title("sin_lon - Cartesian R^3 coords")
+    # plt.tight_layout()
+    # plt.savefig("/users/msalis/project/weather_generator/export/test/Coords_sin-lon_yx_375k_s5_vir.jpg", dpi = 600)
     
-    sys.exit()
+    # sys.exit()
     
     a[0] = stream_id
     geoinfo_offset = 1
